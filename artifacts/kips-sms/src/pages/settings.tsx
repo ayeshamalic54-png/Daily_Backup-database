@@ -107,9 +107,28 @@ export default function Settings() {
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!confirm("This will REPLACE all current data with the backup. Are you sure?")) {
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      const d = backup?.data;
+      const students = d?.students?.length ?? 0;
+      const fees = d?.fees?.length ?? 0;
+      const attendance = d?.attendance?.length ?? 0;
+      const salaries = d?.salaries?.length ?? 0;
+      const accounts = d?.accountEntries?.length ?? 0;
+
+      const warning = students === 0
+        ? `⚠️ KHABARDAR: Is backup mein koi student nahi hai (0 students)!\n\nAgar restore karo ge toh saare students delete ho jayein ge!\n\nBackup ka waqt: ${backup.timestamp ?? "unknown"}\n\nKya aap PAKKA restore karna chahte hain?`
+        : `Backup contents:\n• Students: ${students}\n• Fees: ${fees}\n• Attendance: ${attendance}\n• Salaries: ${salaries}\n• Accounts: ${accounts}\n\nBackup time: ${backup.timestamp ?? "unknown"}\n\nYeh saara current data replace kar dega. Restore karna hai?`;
+
+      if (!confirm(warning)) {
+        e.target.value = ""; return;
+      }
+    } catch {
+      toast({ variant: "destructive", title: "Invalid backup file", description: "File parse nahi ho saki" });
       e.target.value = ""; return;
     }
+
     setRestoring(true);
     try {
       const text = await file.text();
@@ -119,7 +138,7 @@ export default function Settings() {
         body: JSON.stringify(backup),
       });
       const data = await res.json();
-      toast({ title: "Restore complete", description: `Pre-restore backup: ${data.preBackup}` });
+      toast({ title: "Restore complete ✓", description: `Pre-restore backup saved: ${data.preBackup}` });
       await loadBackups();
     } catch (err: unknown) {
       toast({ variant: "destructive", title: "Restore failed", description: String(err) });
