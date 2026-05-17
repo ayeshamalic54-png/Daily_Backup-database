@@ -1,13 +1,23 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Upload, Trash2, RefreshCw, Shield, Database, Clock, CheckCircle } from "lucide-react";
+import { Download, Upload, Trash2, RefreshCw, Shield, Database, Clock, CheckCircle, CalendarClock, Play, AlertCircle, Zap } from "lucide-react";
 
 interface SavedBackup {
   filename: string;
   size: number;
   createdAt: string;
+}
+
+interface AutoBackupStatus {
+  lastRun: string | null;
+  lastStatus: "never" | "success" | "error";
+  lastError: string | null;
+  nextRun: string;
+  enabled: boolean;
+  autoBackupCount: number;
+  autoBackupFiles: string[];
 }
 
 const API = "/api/admin";
@@ -34,13 +44,46 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [lastAutoBackup, setLastAutoBackup] = useState<string | null>(null);
+  const [autoStatus, setAutoStatus] = useState<AutoBackupStatus | null>(null);
+  const [loadingAutoStatus, setLoadingAutoStatus] = useState(false);
+  const [runningNow, setRunningNow] = useState(false);
+
+  useEffect(() => {
+    loadAutoStatus();
+  }, []);
+
+  const loadAutoStatus = async () => {
+    setLoadingAutoStatus(true);
+    try {
+      const res = await apiFetch("/auto-backup/status");
+      setAutoStatus(await res.json());
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingAutoStatus(false);
+    }
+  };
+
+  const runBackupNow = async () => {
+    setRunningNow(true);
+    try {
+      await apiFetch("/auto-backup/run-now", { method: "POST" });
+      toast({ title: "Backup complete!", description: "Auto-backup ran successfully right now." });
+      await loadAutoStatus();
+      await loadBackups();
+    } catch (err: unknown) {
+      toast({ variant: "destructive", title: "Backup failed", description: String(err) });
+    } finally {
+      setRunningNow(false);
+    }
+  };
 
   const loadBackups = async () => {
     setLoadingBackups(true);
     try {
       const res = await apiFetch("/backups");
       setBackups(await res.json());
-    } catch (e: unknown) {
+    } catch {
       toast({ variant: "destructive", title: "Failed to load backups" });
     } finally {
       setLoadingBackups(false);
@@ -157,6 +200,96 @@ export default function Settings() {
         <p className="text-gray-500 text-sm mt-1">Manage system backups and data restore</p>
       </div>
 
+      {/* Auto Daily Backup */}
+      <Card className="border-0 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="w-5 h-5 text-white" />
+              <h2 className="text-white font-semibold text-base">Auto Daily Backup</h2>
+            </div>
+            <span className="bg-white/20 text-white text-xs font-medium px-2.5 py-1 rounded-full flex items-center gap-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
+              Active
+            </span>
+          </div>
+          <p className="text-white/70 text-xs mt-1">Har roz midnight (12 baje raat) Pakistan time automatically backup hota hai</p>
+        </div>
+        <CardContent className="p-5 space-y-4">
+          {loadingAutoStatus ? (
+            <div className="flex items-center gap-2 text-gray-400 text-sm">
+              <RefreshCw className="w-4 h-4 animate-spin" /> Status load ho raha hai...
+            </div>
+          ) : autoStatus ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                <p className="text-xs text-gray-500 mb-1 flex items-center gap-1"><Clock className="w-3 h-3" /> Last Backup</p>
+                {autoStatus.lastRun ? (
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">
+                      {new Date(autoStatus.lastRun).toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" })}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {new Date(autoStatus.lastRun).toLocaleTimeString("en-PK")}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">Kabhi nahi chala</p>
+                )}
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                <p className="text-xs text-gray-500 mb-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Status</p>
+                {autoStatus.lastStatus === "success" ? (
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle className="w-4 h-4 text-emerald-500" />
+                    <span className="text-sm font-semibold text-emerald-700">Successful</span>
+                  </div>
+                ) : autoStatus.lastStatus === "error" ? (
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-red-500" />
+                      <span className="text-sm font-semibold text-red-700">Error</span>
+                    </div>
+                    {autoStatus.lastError && <p className="text-xs text-red-400 mt-0.5">{autoStatus.lastError}</p>}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">Pending...</p>
+                )}
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                <p className="text-xs text-gray-500 mb-1 flex items-center gap-1"><Database className="w-3 h-3" /> Saved Backups</p>
+                <p className="text-sm font-semibold text-gray-800">{autoStatus.autoBackupCount} files</p>
+                <p className="text-xs text-gray-400">Max 7 rakhe jate hain</p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-3 pt-1">
+            <Button
+              onClick={runBackupNow}
+              disabled={runningNow}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {runningNow
+                ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Running...</>
+                : <><Play className="w-4 h-4 mr-2" /> Run Backup Now</>
+              }
+            </Button>
+            <Button variant="outline" size="sm" onClick={loadAutoStatus} disabled={loadingAutoStatus}>
+              <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loadingAutoStatus ? "animate-spin" : ""}`} /> Refresh
+            </Button>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-2">
+            <Zap className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-blue-700">
+              <strong>Agle 7 din ke backups</strong> automatically save hote hain. 7 se zyada hone par purana backup delete ho jata hai.
+              Backup file naam: <code className="bg-blue-100 px-1 rounded">auto-backup-YYYY-MM-DD...</code>
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Manual Backup */}
       <Card>
         <CardHeader>
@@ -192,7 +325,7 @@ export default function Settings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-            <strong>Warning:</strong> Restoring will replace all current student, fee, attendance, exam, and financial data with the backup. Staff records are preserved. A pre-restore backup is saved automatically.
+            <strong>Warning:</strong> Restoring will replace all current student, fee, attendance, exam, and financial data with the backup. Staff records are preserved. A pre-restore backup is saved automatically. Restore se pehle backup ka data count dikhaya jayega.
           </div>
           <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleRestore} />
           <Button
@@ -228,9 +361,17 @@ export default function Settings() {
           ) : (
             <div className="space-y-2">
               {backups.map(b => (
-                <div key={b.filename} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div key={b.filename} className={`flex items-center justify-between p-3 rounded-lg border ${b.filename.startsWith("auto-backup") ? "bg-blue-50 border-blue-100" : b.filename.startsWith("pre-restore") ? "bg-amber-50 border-amber-100" : "bg-gray-50 border-gray-100"}`}>
                   <div>
-                    <p className="text-sm font-mono font-medium text-gray-800">{b.filename}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-mono font-medium text-gray-800">{b.filename}</p>
+                      {b.filename.startsWith("auto-backup") && (
+                        <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Auto</span>
+                      )}
+                      {b.filename.startsWith("pre-restore") && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Safety</span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {new Date(b.createdAt).toLocaleString("en-PK")} · {(b.size / 1024).toFixed(1)} KB
                     </p>

@@ -8,6 +8,7 @@ import { requireAuth } from "../lib/auth";
 import type { Request } from "express";
 import fs from "fs";
 import path from "path";
+import { autoBackupState, runAutoBackup } from "../lib/autoBackup";
 
 type AuthReq = Request & { user: Record<string, unknown> };
 
@@ -199,6 +200,32 @@ router.post("/restore", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Restore failed" });
+  }
+});
+
+// GET /api/admin/auto-backup/status
+router.get("/auto-backup/status", requireAuth, async (req, res) => {
+  const reqUser = (req as AuthReq).user;
+  if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+  try {
+    const autoFiles = fs.existsSync(BACKUP_DIR)
+      ? fs.readdirSync(BACKUP_DIR).filter(f => f.startsWith("auto-backup-")).sort().reverse()
+      : [];
+    res.json({ ...autoBackupState, autoBackupCount: autoFiles.length, autoBackupFiles: autoFiles.slice(0, 7) });
+  } catch (err) {
+    res.status(500).json({ error: "Status check failed" });
+  }
+});
+
+// POST /api/admin/auto-backup/run-now
+router.post("/auto-backup/run-now", requireAuth, async (req, res) => {
+  const reqUser = (req as AuthReq).user;
+  if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+  try {
+    await runAutoBackup();
+    res.json({ message: "Backup ran successfully", state: autoBackupState });
+  } catch (err) {
+    res.status(500).json({ error: "Manual backup run failed" });
   }
 });
 
