@@ -4,8 +4,8 @@ import {
   studentsTable, feesTable, attendanceTable, examsTable, examResultsTable,
   staffTable, salariesTable, accountEntriesTable, certificatesTable, classesTable, usersTable
 } from "@workspace/db";
-import { sql } from "drizzle-orm";
-import { requireAuth } from "../lib/auth";
+import { sql, eq } from "drizzle-orm";
+import { requireAuth, hashPassword } from "../lib/auth";
 import type { Request } from "express";
 import fs from "fs";
 import path from "path";
@@ -37,7 +37,7 @@ async function collectAllData() {
   return { students, fees, attendance, exams, examResults, staff, salaries, accountEntries, certificates, classes, users };
 }
 
-// GET /api/admin/backup — download backup JSON
+// GET /api/admin/backup
 router.get("/backup", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
@@ -53,7 +53,7 @@ router.get("/backup", requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/backup/save — save backup to disk
+// POST /api/admin/backup/save
 router.post("/backup/save", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
@@ -71,7 +71,7 @@ router.post("/backup/save", requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/backups — list saved backups
+// GET /api/admin/backups
 router.get("/backups", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
@@ -91,7 +91,7 @@ router.get("/backups", requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/backups/:filename — download a saved backup
+// GET /api/admin/backups/:filename
 router.get("/backups/:filename", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
@@ -109,7 +109,7 @@ router.get("/backups/:filename", requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/admin/backups/:filename — delete a saved backup
+// DELETE /api/admin/backups/:filename
 router.delete("/backups/:filename", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
@@ -124,15 +124,12 @@ router.delete("/backups/:filename", requireAuth, async (req, res) => {
   }
 });
 
-// Helper: truncate a table and reset its sequence, then bulk-insert rows
 async function truncateAndInsert(tableName: string, seqName: string, rows: Record<string, unknown>[]) {
   await db.execute(sql.raw(`TRUNCATE TABLE "${tableName}" RESTART IDENTITY CASCADE`));
   if (!rows?.length) return;
-  // Insert in batches of 50
   const BATCH = 50;
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    // Use raw SQL so we can supply explicit id values that override the sequence
     const cols = Object.keys(batch[0]!);
     const valuesSql = batch.map((row, ri) =>
       `(${cols.map((_, ci) => `$${ri * cols.length + ci + 1}`).join(", ")})`
@@ -143,11 +140,10 @@ async function truncateAndInsert(tableName: string, seqName: string, rows: Recor
       params
     ));
   }
-  // Reset sequence to max id
   await db.execute(sql.raw(`SELECT setval('${seqName}', COALESCE((SELECT MAX(id) FROM "${tableName}"), 0) + 1, false)`));
 }
 
-// POST /api/admin/restore — restore from uploaded JSON
+// POST /api/admin/restore
 router.post("/restore", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
@@ -156,7 +152,6 @@ router.post("/restore", requireAuth, async (req, res) => {
     if (!backup?.data) { res.status(400).json({ error: "Invalid backup file" }); return; }
     const { students, fees, attendance, exams, examResults, staff, salaries, accountEntries, certificates, classes } = backup.data;
 
-    // Save current state before restore
     ensureBackupDir();
     const preData = await collectAllData();
     const preBackup = { version: "1.0", timestamp: new Date().toISOString(), note: "auto-save before restore", data: preData };
@@ -165,8 +160,6 @@ router.post("/restore", requireAuth, async (req, res) => {
 
     const errors: string[] = [];
 
-    // Restore in dependency order — classes first (no FK deps), then students, then everything else
-    // Classes: preserve existing, only add missing ones from backup
     if (classes?.length) {
       for (const c of classes) {
         try { await db.insert(classesTable).values(c).onConflictDoNothing(); } catch (e: unknown) {
@@ -176,7 +169,6 @@ router.post("/restore", requireAuth, async (req, res) => {
       await db.execute(sql.raw(`SELECT setval('classes_id_seq', COALESCE((SELECT MAX(id) FROM "classes"), 0) + 1, false)`));
     }
 
-    // Students: truncate + re-insert with explicit IDs
     try {
       await db.execute(sql.raw(`DELETE FROM "exam_results"`));
       await db.execute(sql.raw(`DELETE FROM "exams"`));
@@ -262,44 +254,31 @@ router.post("/restore", requireAuth, async (req, res) => {
       await db.execute(sql.raw(`SELECT setval('certificates_id_seq', COALESCE((SELECT MAX(id) FROM "certificates"), 0) + 1, false)`));
     }
 
-    // Verify restore counts
     const afterStudents = await db.select().from(studentsTable);
     req.log.info({ restored: afterStudents.length, errors }, "Restore complete");
 
-    if (errors.length > 0) {
-      res.json({
-        message: `Restore complete with ${errors.length} warning(s)`,
-        preBackup: preFilename,
-        studentsRestored: afterStudents.length,
-        errors,
-      });
-    } else {
-      res.json({
-        message: "Restore complete",
-        preBackup: preFilename,
-        studentsRestored: afterStudents.length,
-        errors: [],
-      });
-    }
+    res.json({
+      message: errors.length > 0 ? `Restore complete with ${errors.length} warning(s)` : "Restore complete",
+      preBackup: preFilename,
+      studentsRestored: afterStudents.length,
+      errors,
+    });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: `Restore failed: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
-// POST /api/admin/restore-from-server/:filename — restore directly from a saved server backup
+// POST /api/admin/restore-from-server/:filename
 router.post("/restore-from-server/:filename", requireAuth, async (req, res) => {
   const reqUser = (req as AuthReq).user;
   if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
   try {
     const filepath = path.join(BACKUP_DIR, req.params.filename);
     if (!fs.existsSync(filepath) || !req.params.filename.endsWith(".json")) {
-      res.status(404).json({ error: "Backup not found" }); return;
+      res.status(400).json({ error: "Backup not found" }); return;
     }
     const backup = JSON.parse(fs.readFileSync(filepath, "utf-8"));
-    req.body = backup;
-    // Forward to the restore handler by calling the same logic
-    // Inline the restore logic for simplicity
     if (!backup?.data) { res.status(400).json({ error: "Invalid backup file" }); return; }
     const { students, fees, attendance, exams, examResults, salaries, accountEntries, certificates, classes } = backup.data;
 
@@ -411,6 +390,66 @@ router.post("/auto-backup/run-now", requireAuth, async (req, res) => {
     res.json({ message: "Backup ran successfully", state: autoBackupState });
   } catch (err) {
     res.status(500).json({ error: "Manual backup run failed" });
+  }
+});
+
+// POST /api/admin/sync-student-users
+// Un tamam students ke login accounts banaaye jinka usersTable mein koi entry nahi
+router.post("/sync-student-users", requireAuth, async (req, res) => {
+  const reqUser = (req as AuthReq).user;
+  if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+  try {
+    const allStudents = await db.select().from(studentsTable);
+    const allUsers = await db.select({
+      relatedId: usersTable.relatedId,
+      username: usersTable.username,
+    }).from(usersTable).where(eq(usersTable.role, "student"));
+
+    const existingRelatedIds = new Set(allUsers.map(u => u.relatedId).filter(Boolean));
+    const existingUsernames = new Set(allUsers.map(u => u.username));
+
+    const missingStudents = allStudents.filter(s =>
+      !existingRelatedIds.has(s.id) && !existingUsernames.has(s.username ?? "")
+    );
+
+    const created: string[] = [];
+    const errors: string[] = [];
+
+    for (const student of missingStudents) {
+      try {
+        const username = student.username ??
+          student.name.toLowerCase().replace(/\s+/g, ".") + "." + (student.admissionNumber?.split("-").pop() ?? String(student.id));
+        const hashed = await hashPassword("kips123");
+        await db.insert(usersTable).values({
+          username,
+          password: hashed,
+          role: "student",
+          name: student.name,
+          relatedId: student.id,
+        }).onConflictDoNothing();
+        if (!student.username) {
+          await db.update(studentsTable).set({ username }).where(eq(studentsTable.id, student.id));
+        }
+        created.push(`${student.name} — login: ${username}`);
+      } catch (e: unknown) {
+        errors.push(`${student.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // Sequences theek karein
+    await db.execute(sql.raw(`SELECT setval('students_id_seq', COALESCE((SELECT MAX(id) FROM "students"), 0) + 1, false)`));
+    await db.execute(sql.raw(`SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM "users"), 0) + 1, false)`));
+
+    res.json({
+      message: `Sync mukammal. ${created.length} account(s) banaye gaye.`,
+      totalStudents: allStudents.length,
+      alreadyHadAccounts: allStudents.length - missingStudents.length,
+      created,
+      errors,
+    });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: `Sync failed: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 

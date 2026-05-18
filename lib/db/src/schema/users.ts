@@ -6,10 +6,10 @@ export const usersTable = pgTable("users", {
   id: serial("id").primaryKey(),
   username: varchar("username", { length: 100 }).notNull().unique(),
   password: text("password").notNull(),
-  role: varchar("role", { length: 20 }).notNull().default("admin"), // admin, teacher, student
+  role: varchar("role", { length: 20 }).notNull().default("admin"),
   name: text("name").notNull(),
   email: varchar("email", { length: 200 }),
-  relatedId: serial("related_id"), // studentId or staffId
+  relatedId: serial("related_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -1,3 +1,4 @@
+
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,6 +13,7 @@ import StudentDetail from "@/pages/student-detail";
 import StudentNew from "@/pages/student-new";
 import Classes from "@/pages/classes";
 import Fees from "@/pages/fees";
+import FeeStructure from "@/pages/fee-structure";
 import FeeDefaulters from "@/pages/fee-defaulters";
 import FeeVoucher from "@/pages/fee-voucher";
 import Arrears from "@/pages/arrears";
@@ -45,6 +47,7 @@ function AuthenticatedRoutes() {
         <Route path="/fees/defaulters" component={FeeDefaulters} />
         <Route path="/fees/voucher" component={FeeVoucher} />
         <Route path="/fees" component={Fees} />
+        <Route path="/fee-structure" component={FeeStructure} />
         <Route path="/arrears" component={Arrears} />
         <Route path="/attendance" component={Attendance} />
         <Route path="/exams" component={Exams} />

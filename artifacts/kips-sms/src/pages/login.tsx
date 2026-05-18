@@ -3,12 +3,13 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion } from "framer-motion";
+import { useState } from "react";
 import { useLogin } from "@workspace/api-client-react";
 import { useAuthStore } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { User, Lock, Loader2 } from "lucide-react";
+import { User, Lock, Loader2, ShieldCheck, GraduationCap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const loginSchema = z.object({
@@ -16,11 +17,14 @@ const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+type Role = "admin" | "student";
+
 export default function Login() {
   const [, setLocation] = useLocation();
   const { login } = useAuthStore();
   const { toast } = useToast();
   const loginMutation = useLogin();
+  const [selectedRole, setSelectedRole] = useState<Role>("student");
 
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -29,24 +33,43 @@ export default function Login() {
 
   const onSubmit = (values: z.infer<typeof loginSchema>) => {
     loginMutation.mutate(
-      { data: { ...values, role: "admin" } },
+      { data: { ...values } },
       {
         onSuccess: (data) => {
           login(data.user, data.token);
-          setLocation("/dashboard");
+          if (data.user.role === "admin" || data.user.role === "teacher") {
+            setLocation("/dashboard");
+          } else {
+            setLocation("/student-dashboard");
+          }
           toast({ title: "Welcome back!", description: `Logged in as ${data.user.name}` });
         },
         onError: () => {
-          toast({ variant: "destructive", title: "Login failed", description: "Invalid username or password." });
+          toast({
+            variant: "destructive",
+            title: "Login failed",
+            description: "Invalid username or password.",
+          });
         },
       }
     );
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4"
-      style={{ background: "linear-gradient(135deg, #1a2a5e 0%, #2d4a9a 40%, #e07b1a 100%)" }}>
-      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=2070&auto=format&fit=crop')", backgroundSize: "cover", backgroundPosition: "center", mixBlendMode: "overlay" }} />
+    <div
+      className="min-h-screen w-full flex items-center justify-center p-4"
+      style={{ background: "linear-gradient(135deg, #1a2a5e 0%, #2d4a9a 40%, #e07b1a 100%)" }}
+    >
+      <div
+        className="absolute inset-0 opacity-10"
+        style={{
+          backgroundImage:
+            "url('https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=2070&auto=format&fit=crop')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          mixBlendMode: "overlay",
+        }}
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -62,8 +85,49 @@ export default function Login() {
               className="w-24 h-24 rounded-full object-cover shadow-xl border-4 border-white mb-4"
               style={{ boxShadow: "0 0 0 4px #e07b1a, 0 8px 32px rgba(26,42,94,0.3)" }}
             />
-            <h1 className="text-2xl font-bold text-center" style={{ color: "#1a2a5e" }}>KIPS School Hassari</h1>
-            <p className="text-sm text-gray-500 mt-1 font-medium tracking-wide">Bright Future — School Portal</p>
+            <h1 className="text-2xl font-bold text-center" style={{ color: "#1a2a5e" }}>
+              KIPS School Hassari
+            </h1>
+            <p className="text-sm text-gray-500 mt-1 font-medium tracking-wide">
+              Bright Future — School Portal
+            </p>
+          </div>
+
+          <div className="flex rounded-xl overflow-hidden border border-gray-200 mb-6">
+            <button
+              type="button"
+              onClick={() => setSelectedRole("student")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold transition-all ${
+                selectedRole === "student"
+                  ? "text-white"
+                  : "text-gray-500 bg-gray-50 hover:bg-gray-100"
+              }`}
+              style={
+                selectedRole === "student"
+                  ? { background: "linear-gradient(135deg, #1a2a5e, #2d4a9a)" }
+                  : {}
+              }
+            >
+              <GraduationCap className="w-4 h-4" />
+              Student
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedRole("admin")}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold transition-all ${
+                selectedRole === "admin"
+                  ? "text-white"
+                  : "text-gray-500 bg-gray-50 hover:bg-gray-100"
+              }`}
+              style={
+                selectedRole === "admin"
+                  ? { background: "linear-gradient(135deg, #1a2a5e, #e07b1a)" }
+                  : {}
+              }
+            >
+              <ShieldCheck className="w-4 h-4" />
+              Admin
+            </button>
           </div>
 
           <Form {...form}>
@@ -73,12 +137,18 @@ export default function Login() {
                 name="username"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-gray-700 font-medium">Username</FormLabel>
+                    <FormLabel className="text-gray-700 font-medium">
+                      {selectedRole === "student" ? "Username / Admission Number" : "Username"}
+                    </FormLabel>
                     <FormControl>
                       <div className="relative">
                         <User className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
                         <Input
-                          placeholder="Enter your username"
+                          placeholder={
+                            selectedRole === "student"
+                              ? "Enter your username"
+                              : "Enter admin username"
+                          }
                           className="pl-10 bg-gray-50 border-gray-200 focus:border-blue-500 focus:ring-blue-500"
                           autoComplete="username"
                           {...field}
@@ -119,7 +189,11 @@ export default function Login() {
                 style={{ background: "linear-gradient(135deg, #1a2a5e, #e07b1a)" }}
                 disabled={loginMutation.isPending}
               >
-                {loginMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sign In"}
+                {loginMutation.isPending ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  `Sign In`
+                )}
               </Button>
             </form>
           </Form>

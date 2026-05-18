@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useListSalaries, useCreateSalary, usePaySalary, useListStaff, getListSalariesQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -14,30 +15,56 @@ import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Loader2, Printer, FileText, X, RefreshCw, CheckCircle } from "lucide-react";
 
+// @page margin:0 removes browser URL / date headers & footers from print
+const PRINT_STYLES = `
+  @page { size: A4 portrait; margin: 0; }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+    body > *:not(#kips-print-portal) { display: none !important; }
+    #kips-print-portal {
+      display: block !important;
+      position: absolute !important;
+      top: 0 !important; left: 0 !important;
+      width: 100% !important;
+      background: white !important;
+      font-family: Arial, sans-serif !important;
+      color: #111827 !important;
+      font-size: 11pt !important;
+      padding: 14mm 14mm !important;
+      box-sizing: border-box !important;
+    }
+    #kips-print-portal * { font-family: Arial, sans-serif !important; }
+    table { border-collapse: collapse !important; width: 100% !important; page-break-inside: auto; }
+    tr    { page-break-inside: avoid; page-break-after: auto; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+  }
+`;
+
 const schema = z.object({
   staffId: z.string().min(1, "Staff required"),
-  amount: z.string().min(1, "Amount required"),
-  month: z.string().min(1, "Month required"),
+  amount:  z.string().min(1, "Amount required"),
+  month:   z.string().min(1, "Month required"),
 });
 
 const deductionSchema = z.object({
-  absentDays: z.string().default("0"),
-  lateDays: z.string().default("0"),
-  tax: z.string().default("0"),
-  otherDeduction: z.string().default("0"),
-  otherDeductionLabel: z.string().default(""),
-  allowance: z.string().default("0"),
-  allowanceLabel: z.string().default(""),
+  absentDays:           z.string().default("0"),
+  lateDays:             z.string().default("0"),
+  tax:                  z.string().default("0"),
+  otherDeduction:       z.string().default("0"),
+  otherDeductionLabel:  z.string().default(""),
+  allowance:            z.string().default("0"),
+  allowanceLabel:       z.string().default(""),
 });
 
 type Salary = {
   id: number;
-  staffId?: number;
-  staffName?: string | null;
-  month: string;
-  amount: number;
-  status: string;
-  paidDate?: string | null;
+  staffId?:    number;
+  staffName?:  string | null;
+  month:       string;
+  amount:      number;
+  status:      string;
+  paidDate?:   string | null;
 };
 
 function authHeader() {
@@ -45,20 +72,20 @@ function authHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// ─── Salary Slip Modal ────────────────────────────────────────────────────────
 function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }) {
-  const slipRef = useRef<HTMLDivElement>(null);
+  const slipRef   = useRef<HTMLDivElement>(null);
   const [attLoading, setAttLoading] = useState(false);
-  const [attLoaded, setAttLoaded] = useState(false);
+  const [attLoaded, setAttLoaded]   = useState(false);
 
   const form = useForm<z.infer<typeof deductionSchema>>({
     resolver: zodResolver(deductionSchema),
     defaultValues: { absentDays: "0", lateDays: "0", tax: "0", otherDeduction: "0", otherDeductionLabel: "", allowance: "0", allowanceLabel: "" },
   });
 
-  // Auto-load attendance when slip opens
   useEffect(() => {
     if (!salary.staffId || !salary.month) return;
-    const month = salary.month.slice(0, 7); // YYYY-MM
+    const month = salary.month.slice(0, 7);
     setAttLoading(true);
     fetch(`/api/attendance/summary?month=${month}&type=staff&staffId=${salary.staffId}`, {
       headers: authHeader() as HeadersInit,
@@ -75,35 +102,39 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
       .finally(() => setAttLoading(false));
   }, [salary.staffId, salary.month]);
 
-  const values = form.watch();
+  const values      = form.watch();
   const basicSalary = salary.amount;
-  const perDay = Math.round(basicSalary / 26);
-  const absentDed = Number(values.absentDays || 0) * perDay;
-  const lateDed = Number(values.lateDays || 0) * Math.round(perDay / 2);
-  const taxDed = Number(values.tax || 0);
-  const otherDed = Number(values.otherDeduction || 0);
-  const allowance = Number(values.allowance || 0);
+  const perDay      = Math.round(basicSalary / 26);
+  const absentDed   = Number(values.absentDays || 0) * perDay;
+  const lateDed     = Number(values.lateDays || 0) * Math.round(perDay / 2);
+  const taxDed      = Number(values.tax || 0);
+  const otherDed    = Number(values.otherDeduction || 0);
+  const allowance   = Number(values.allowance || 0);
   const totalDeductions = absentDed + lateDed + taxDed + otherDed;
-  const netSalary = basicSalary + allowance - totalDeductions;
+  const netSalary   = basicSalary + allowance - totalDeductions;
 
   const monthLabel = salary.month
     ? new Date(salary.month.slice(0, 7) + "-01").toLocaleDateString("en-PK", { month: "long", year: "numeric" })
     : salary.month;
 
+  // Salary slip uses window.open (separate window) — no portal needed,
+  // @page margin:0 in the new window's CSS removes URL footer there too.
   const handlePrint = () => {
     const content = slipRef.current?.innerHTML;
     const w = window.open("", "_blank");
     if (!w || !content) return;
-    w.document.write(`<html><head><title>Salary Slip</title>
+    w.document.write(`<html><head><title>Salary Slip — ${salary.staffName}</title>
       <style>
-        body{font-family:Arial,sans-serif;padding:30px;color:#111}
-        table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
-        td,th{padding:6px 10px;border:1px solid #ddd}
-        th{background:#f0f4ff;font-weight:600;text-align:left}
-        .net-row td{font-weight:bold;font-size:15px;background:#1a2a5e;color:white}
-        .footer{margin-top:50px;display:flex;justify-content:space-between}
-        .sig{border-top:1px solid #333;width:150px;text-align:center;padding-top:4px;font-size:12px}
-      </style></head><body>${content}
+        @page { size: A4 portrait; margin: 0; }
+        body { font-family: Arial, sans-serif; padding: 30px; color: #111; margin: 0; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+        td, th { padding: 6px 10px; border: 1px solid #ddd; }
+        th { background: #f0f4ff; font-weight: 600; text-align: left; }
+        .net-row td { font-weight: bold; font-size: 15px; background: #1a2a5e; color: white; }
+        .footer { margin-top: 50px; display: flex; justify-content: space-between; }
+        .sig { border-top: 1px solid #333; width: 150px; text-align: center; padding-top: 4px; font-size: 12px; }
+      </style></head><body>
+      ${content}
       <div class="footer">
         <div class="sig">Employee Signature</div>
         <div class="sig">Principal Signature</div>
@@ -123,13 +154,12 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
         </div>
 
         <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Left: Deductions form */}
           <div className="space-y-3">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Deductions & Allowances</h3>
-              {attLoading && <span className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Loading attendance...</span>}
-              {attLoaded && !attLoading && (
-                <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Auto-loaded from records</span>
-              )}
+              {attLoading && <span className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Loading...</span>}
+              {attLoaded && !attLoading && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Auto-loaded</span>}
             </div>
             <Form {...form}>
               <form className="space-y-3">
@@ -196,15 +226,16 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
             </div>
           </div>
 
+          {/* Right: Printable slip preview */}
           <div className="border rounded-xl p-4 bg-gray-50 overflow-auto" ref={slipRef}>
-            <div style={{ textAlign: "center", borderBottom: "2px solid #1a2a5e", paddingBottom: "10px", marginBottom: "10px" }}>
-              <div style={{ fontSize: "17px", fontWeight: "bold", color: "#1a2a5e" }}>KIPS School Hassari</div>
-              <div style={{ fontSize: "11px", color: "#666" }}>Bright Future — School Portal</div>
+            <div style={{ textAlign: "center", borderBottom: "2px solid #1a2a5e", paddingBottom: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 17, fontWeight: "bold", color: "#1a2a5e" }}>KIPS School Hassari</div>
+              <div style={{ fontSize: 11, color: "#666" }}>Bright Future — School Portal</div>
             </div>
-            <div style={{ textAlign: "center", background: "#1a2a5e", color: "white", padding: "4px 8px", borderRadius: "4px", marginBottom: "10px", fontSize: "12px", fontWeight: "bold" }}>
+            <div style={{ textAlign: "center", background: "#1a2a5e", color: "white", padding: "4px 8px", borderRadius: 4, marginBottom: 10, fontSize: 12, fontWeight: "bold" }}>
               SALARY SLIP — {monthLabel}
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", marginBottom: "8px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginBottom: 8 }}>
               <tbody>
                 <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", fontWeight: 600 }}>Employee</td><td style={{ padding: "3px 6px", border: "1px solid #ddd" }}>{salary.staffName}</td></tr>
                 <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", fontWeight: 600 }}>Month</td><td style={{ padding: "3px 6px", border: "1px solid #ddd" }}>{monthLabel}</td></tr>
@@ -213,7 +244,7 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
                 <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", fontWeight: 600 }}>Late Days</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#f59e0b" }}>{values.lateDays || 0}</td></tr>
               </tbody>
             </table>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead>
                 <tr style={{ background: "#f0f4ff" }}>
                   <th style={{ padding: "4px 6px", border: "1px solid #ddd", textAlign: "left" }}>Description</th>
@@ -228,7 +259,7 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
                 {taxDed > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- Tax</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{taxDed.toLocaleString()}</td></tr>}
                 {otherDed > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- {values.otherDeductionLabel || "Other"}</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{otherDed.toLocaleString()}</td></tr>}
                 <tr style={{ background: "#fff7f7" }}><td style={{ padding: "4px 6px", border: "1px solid #ddd", fontWeight: "bold" }}>Total Deductions</td><td style={{ padding: "4px 6px", border: "1px solid #ddd", textAlign: "right", fontWeight: "bold", color: "#dc2626" }}>-{totalDeductions.toLocaleString()}</td></tr>
-                <tr style={{ background: "#1a2a5e", color: "white" }}><td style={{ padding: "6px", border: "1px solid #1a2a5e", fontWeight: "bold" }}>NET SALARY</td><td style={{ padding: "6px", border: "1px solid #1a2a5e", textAlign: "right", fontWeight: "bold" }}>PKR {netSalary.toLocaleString()}</td></tr>
+                <tr style={{ background: "#1a2a5e", color: "white" }}><td style={{ padding: 6, border: "1px solid #1a2a5e", fontWeight: "bold" }}>NET SALARY</td><td style={{ padding: 6, border: "1px solid #1a2a5e", textAlign: "right", fontWeight: "bold" }}>PKR {netSalary.toLocaleString()}</td></tr>
               </tbody>
             </table>
           </div>
@@ -245,21 +276,30 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
   );
 }
 
+// ─── Main Salaries Page ───────────────────────────────────────────────────────
 export default function Salaries() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen]               = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
-  const [slipSalary, setSlipSalary] = useState<Salary | null>(null);
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const [slipSalary, setSlipSalary]   = useState<Salary | null>(null);
+  const { toast }      = useToast();
+  const queryClient    = useQueryClient();
 
   const { data: salaries, isLoading } = useListSalaries(statusFilter ? { status: statusFilter as "paid" | "unpaid" } : {});
-  const { data: staff } = useListStaff();
-  const createMutation = useCreateSalary();
-  const payMutation = usePaySalary();
+  const { data: staff }   = useListStaff();
+  const createMutation    = useCreateSalary();
+  const payMutation       = usePaySalary();
 
-  const form = useForm<z.infer<typeof schema>>({
-    resolver: zodResolver(schema),
-  });
+  useEffect(() => {
+    const existing = document.getElementById("kips-print-styles");
+    if (existing) existing.remove();
+    const el = document.createElement("style");
+    el.id = "kips-print-styles";
+    el.textContent = PRINT_STYLES;
+    document.head.appendChild(el);
+    return () => { document.getElementById("kips-print-styles")?.remove(); };
+  }, []);
+
+  const form = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
 
   const onSubmit = (values: z.infer<typeof schema>) => {
     createMutation.mutate({ data: { staffId: Number(values.staffId), amount: Number(values.amount), month: values.month } }, {
@@ -276,129 +316,224 @@ export default function Salaries() {
   const handlePay = (id: number) => {
     if (!confirm("Mark this salary as paid?")) return;
     payMutation.mutate({ id }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() });
-        toast({ title: "Salary marked as paid" });
-      },
+      onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() }); toast({ title: "Salary marked as paid" }); },
       onError: () => toast({ variant: "destructive", title: "Payment failed" }),
     });
   };
 
-  const totalPaid = salaries?.filter(s => s.status === "paid").reduce((a, s) => a + s.amount, 0) ?? 0;
+  const totalPaid    = salaries?.filter(s => s.status === "paid").reduce((a, s) => a + s.amount, 0)   ?? 0;
   const totalPending = salaries?.filter(s => s.status === "unpaid").reduce((a, s) => a + s.amount, 0) ?? 0;
 
+  const printDate = new Date().toLocaleDateString("en-PK", { day: "numeric", month: "long", year: "numeric" });
+
+  // Print table styles
+  const th = { padding: "8px 10px", background: "#dbeafe", color: "#1e3a8a", fontWeight: 700, fontSize: 10, textAlign: "left" as const, border: "1px solid #93c5fd" };
+  const td  = { padding: "7px 10px", border: "1px solid #e5e7eb", fontSize: 10, color: "#1f2937", background: "#ffffff" };
+  const tdA = { ...td, background: "#f0f9ff" };
+
+  const printPortal = createPortal(
+    <div id="kips-print-portal" style={{ position: "absolute", left: "-99999px", top: "-99999px", fontFamily: "Arial, sans-serif", background: "white", color: "#111827" }}>
+
+      {/* Letterhead */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, borderBottom: "3px solid #1e3a8a", paddingBottom: 14, marginBottom: 20 }}>
+        <img src="/kips-logo.jpeg" alt="KIPS" style={{ width: 80, height: 80, objectFit: "contain", flexShrink: 0 }} />
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: "#1e3a8a" }}>KIPS School Hassari</h1>
+          <p style={{ margin: "3px 0 0", fontSize: 12, color: "#ea580c", fontWeight: 700 }}>Bright Future — School Portal</p>
+          <p style={{ margin: "4px 0 0", fontSize: 10, color: "#6b7280" }}>{printDate}</p>
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#1e3a8a" }}>Salary Report</h2>
+        <p style={{ margin: "3px 0 0", fontSize: 10, color: "#6b7280" }}>Staff salary management & payroll summary</p>
+      </div>
+
+      {/* Summary */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
+        {[
+          { label: "Total Records", value: (salaries ?? []).length, color: "#1d4ed8" },
+          { label: "Total Paid",    value: `PKR ${totalPaid.toLocaleString()}`,    color: "#065f46" },
+          { label: "Pending",       value: `PKR ${totalPending.toLocaleString()}`, color: "#b91c1c" },
+        ].map(c => (
+          <div key={c.label} style={{ flex: "1 1 0", border: `2px solid ${c.color}`, borderRadius: 8, padding: "10px 8px", textAlign: "center", background: "#f9fafb" }}>
+            <p style={{ margin: 0, fontSize: 8, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.7 }}>{c.label}</p>
+            <p style={{ margin: "6px 0 0", fontSize: 14, fontWeight: 900, color: c.color }}>{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ width: 4, height: 18, background: "#1d4ed8", borderRadius: 2 }} />
+        <h3 style={{ margin: 0, fontSize: 11, fontWeight: 800, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: 0.7 }}>
+          Salary Records — {(salaries ?? []).length}
+        </h3>
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>{["#","Staff Member","Month","Basic (PKR)","Paid Date","Status"].map(h => <th key={h} style={th}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {!(salaries ?? []).length
+            ? <tr><td colSpan={6} style={{ ...td, textAlign: "center", color: "#9ca3af", fontStyle: "italic" }}>No salary records found</td></tr>
+            : (salaries ?? []).map((sal, i) => (
+              <tr key={sal.id}>
+                <td style={i % 2 === 0 ? td : tdA}>{i + 1}</td>
+                <td style={{ ...(i % 2 === 0 ? td : tdA), fontWeight: 700 }}>{sal.staffName || "—"}</td>
+                <td style={i % 2 === 0 ? td : tdA}>{sal.month}</td>
+                <td style={{ ...(i % 2 === 0 ? td : tdA), fontWeight: 700 }}>PKR {sal.amount.toLocaleString()}</td>
+                <td style={i % 2 === 0 ? td : tdA}>{sal.paidDate || "—"}</td>
+                <td style={i % 2 === 0 ? td : tdA}>{sal.status}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+        {(salaries ?? []).length > 0 && (
+          <tfoot>
+            <tr style={{ background: "#dbeafe" }}>
+              <td colSpan={3} style={th}>Summary</td>
+              <td style={{ ...th, color: "#065f46" }}>Paid: PKR {totalPaid.toLocaleString()}</td>
+              <td style={{ ...th, color: "#b91c1c" }}>Pending: PKR {totalPending.toLocaleString()}</td>
+              <td style={th} />
+            </tr>
+          </tfoot>
+        )}
+      </table>
+
+      {/* Footer */}
+      <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 28, paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+        <p style={{ margin: 0, fontSize: 8, color: "#9ca3af" }}>KIPS School Hassari — Bright Future School Management Portal</p>
+        <p style={{ margin: 0, fontSize: 8, color: "#9ca3af" }}>Generated: {printDate}</p>
+      </div>
+    </div>,
+    document.body
+  );
+
   return (
-    <div className="space-y-6">
+    <>
+      {printPortal}
       {slipSalary && <SalarySlip salary={slipSalary} onClose={() => setSlipSalary(null)} />}
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Salaries</h1>
-          <p className="text-gray-500 text-sm mt-1">Staff salary management & payslips with deductions</p>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Salaries</h1>
+            <p className="text-gray-500 text-sm mt-1">Staff salary management & payslips with deductions</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <Printer className="w-4 h-4 mr-1" /> Print
+            </Button>
+            <Dialog open={open} onOpenChange={setOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-gradient-to-r from-cyan-600 to-blue-600 text-white">
+                  <Plus className="w-4 h-4 mr-2" /> Add Record
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New Salary Record</DialogTitle></DialogHeader>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                    <FormField control={form.control} name="staffId" render={({ field }) => (
+                      <FormItem><FormLabel>Staff Member *</FormLabel>
+                        <Select onValueChange={field.onChange}><FormControl><SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger></FormControl>
+                          <SelectContent>{staff?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.role})</SelectItem>)}</SelectContent>
+                        </Select><FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="amount" render={({ field }) => (
+                      <FormItem><FormLabel>Basic Salary (PKR) *</FormLabel><FormControl><Input type="number" placeholder="35000" {...field} /></FormControl><FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="month" render={({ field }) => (
+                      <FormItem><FormLabel>Month *</FormLabel><FormControl><Input type="month" {...field} /></FormControl><FormMessage /></FormItem>
+                    )} />
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                      <Button type="submit" disabled={createMutation.isPending}>
+                        {createMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Create
+                      </Button>
+                    </div>
+                  </form>
+                </Form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Total Records", value: (salaries?.length ?? 0).toString(), gradient: "from-blue-500 to-cyan-500" },
+            { label: "Total Paid",    value: `PKR ${totalPaid.toLocaleString()}`,    gradient: "from-emerald-500 to-green-500" },
+            { label: "Pending",       value: `PKR ${totalPending.toLocaleString()}`, gradient: "from-red-500 to-rose-600"      },
+          ].map(c => (
+            <Card key={c.label} className="overflow-hidden border-0 shadow-sm">
+              <CardContent className="p-0">
+                <div className={`bg-gradient-to-br ${c.gradient} p-4`}>
+                  <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{c.label}</p>
+                  <p className="text-white text-xl font-bold mt-1">{c.value}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="w-4 h-4 mr-1" /> Print</Button>
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-gradient-to-r from-cyan-600 to-blue-600 text-white">
-                <Plus className="w-4 h-4 mr-2" /> Add Record
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New Salary Record</DialogTitle></DialogHeader>
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                  <FormField control={form.control} name="staffId" render={({ field }) => (
-                    <FormItem><FormLabel>Staff Member *</FormLabel>
-                      <Select onValueChange={field.onChange}><FormControl><SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger></FormControl>
-                        <SelectContent>{staff?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.role})</SelectItem>)}</SelectContent>
-                      </Select><FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="amount" render={({ field }) => (
-                    <FormItem><FormLabel>Basic Salary (PKR) *</FormLabel><FormControl><Input type="number" placeholder="35000" {...field} /></FormControl><FormMessage /></FormItem>
-                  )} />
-                  <FormField control={form.control} name="month" render={({ field }) => (
-                    <FormItem><FormLabel>Month *</FormLabel><FormControl><Input type="month" {...field} /></FormControl><FormMessage /></FormItem>
-                  )} />
-                  <div className="flex justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                    <Button type="submit" disabled={createMutation.isPending}>
-                      {createMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Create
-                    </Button>
-                  </div>
-                </form>
-              </Form>
-            </DialogContent>
-          </Dialog>
+          {[{ val: undefined, label: "All" }, { val: "paid", label: "Paid" }, { val: "unpaid", label: "Unpaid" }].map(f => (
+            <Button key={f.label} size="sm" variant={statusFilter === f.val ? "default" : "outline"} onClick={() => setStatusFilter(f.val)}>{f.label}</Button>
+          ))}
         </div>
-      </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Records", value: (salaries?.length ?? 0).toString(), gradient: "from-blue-500 to-cyan-500" },
-          { label: "Total Paid", value: `PKR ${totalPaid.toLocaleString()}`, gradient: "from-emerald-500 to-green-500" },
-          { label: "Pending", value: `PKR ${totalPending.toLocaleString()}`, gradient: "from-red-500 to-rose-600" },
-        ].map(c => (
-          <Card key={c.label} className="overflow-hidden border-0 shadow-sm">
-            <CardContent className="p-0">
-              <div className={`bg-gradient-to-br ${c.gradient} p-4`}>
-                <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{c.label}</p>
-                <p className="text-white text-xl font-bold mt-1">{c.value}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        <Card>
+          <CardContent className="p-0">
+            {isLoading
+              ? <div className="p-6 space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+              : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {["Staff Member","Month","Basic (PKR)","Paid Date","Status","Actions"].map(h => (
+                          <th key={h} className="text-left py-3 px-3 font-semibold text-gray-600">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!salaries?.length
+                        ? <tr><td colSpan={6} className="py-12 text-center text-gray-400">No salary records found</td></tr>
+                        : salaries?.map(sal => (
+                          <tr key={sal.id} className="border-b hover:bg-gray-50">
+                            <td className="py-3 px-3 font-medium text-gray-900">{sal.staffName || "—"}</td>
+                            <td className="py-3 px-3 text-gray-600">{sal.month}</td>
+                            <td className="py-3 px-3 font-bold text-gray-900">PKR {sal.amount.toLocaleString()}</td>
+                            <td className="py-3 px-3 text-gray-500">{sal.paidDate || "—"}</td>
+                            <td className="py-3 px-3">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${sal.status === "paid" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-red-100 text-red-700 border-red-200"}`}>
+                                {sal.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="flex items-center gap-1">
+                                <Button size="sm" variant="outline" className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50" onClick={() => setSlipSalary(sal as Salary)}>
+                                  <FileText className="w-3 h-3 mr-1" /> Slip
+                                </Button>
+                                {sal.status === "unpaid" && (
+                                  <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handlePay(sal.id)} disabled={payMutation.isPending}>Pay</Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+          </CardContent>
+        </Card>
       </div>
-
-      <div className="flex gap-2">
-        {[{ val: undefined, label: "All" }, { val: "paid", label: "Paid" }, { val: "unpaid", label: "Unpaid" }].map(f => (
-          <Button key={f.label} size="sm" variant={statusFilter === f.val ? "default" : "outline"} onClick={() => setStatusFilter(f.val)}>{f.label}</Button>
-        ))}
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? <div className="p-6 space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {["Staff Member", "Month", "Basic (PKR)", "Paid Date", "Status", "Actions"].map(h => (
-                      <th key={h} className="text-left py-3 px-3 font-semibold text-gray-600">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {!salaries?.length ? (
-                    <tr><td colSpan={6} className="py-12 text-center text-gray-400">No salary records found</td></tr>
-                  ) : salaries?.map(sal => (
-                    <tr key={sal.id} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-3 font-medium text-gray-900">{sal.staffName || "—"}</td>
-                      <td className="py-3 px-3 text-gray-600">{sal.month}</td>
-                      <td className="py-3 px-3 font-bold text-gray-900">PKR {sal.amount.toLocaleString()}</td>
-                      <td className="py-3 px-3 text-gray-500">{sal.paidDate || "—"}</td>
-                      <td className="py-3 px-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${sal.status === "paid" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-red-100 text-red-700 border-red-200"}`}>{sal.status}</span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <div className="flex items-center gap-1">
-                          <Button size="sm" variant="outline" className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50" onClick={() => setSlipSalary(sal as Salary)}>
-                            <FileText className="w-3 h-3 mr-1" /> Slip
-                          </Button>
-                          {sal.status === "unpaid" && (
-                            <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handlePay(sal.id)} disabled={payMutation.isPending}>Pay</Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    </>
   );
 }

@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable } from "@workspace/db";
+import { usersTable, studentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { signToken, comparePassword, hashPassword, requireAuth } from "../lib/auth";
+import type { Request } from "express";
 
 const router = Router();
 
-// POST /api/auth/login
 router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -14,29 +14,86 @@ router.post("/login", async (req, res) => {
       res.status(400).json({ error: "Username and password required" });
       return;
     }
-    const users = await db.select().from(usersTable).where(eq(usersTable.username, username)).limit(1);
-    if (!users.length) {
+
+    const trimmed = String(username).trim();
+
+    // Step 1: usersTable mein username se dhundo
+    const [existingUser] = await db.select().from(usersTable)
+      .where(eq(usersTable.username, trimmed)).limit(1);
+
+    if (existingUser) {
+      const valid = await comparePassword(password, existingUser.password);
+      if (!valid) {
+        res.status(401).json({ error: "Invalid credentials" });
+        return;
+      }
+      const token = signToken({ id: existingUser.id, username: existingUser.username, role: existingUser.role, name: existingUser.name });
+      res.json({ token, user: { id: existingUser.id, username: existingUser.username, role: existingUser.role, name: existingUser.name, email: existingUser.email } });
+      return;
+    }
+
+    // Step 2: admissionNumber se student dhundo
+    let student = null;
+    const [byAdm] = await db.select().from(studentsTable)
+      .where(eq(studentsTable.admissionNumber, trimmed)).limit(1);
+    if (byAdm) {
+      student = byAdm;
+    } else {
+      // Step 3: rollNumber se dhundo
+      const [byRoll] = await db.select().from(studentsTable)
+        .where(eq(studentsTable.rollNumber, trimmed)).limit(1);
+      if (byRoll) student = byRoll;
+    }
+
+    if (!student) {
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
-    const user = users[0];
-    const valid = await comparePassword(password, user.password);
-    if (!valid) {
+
+    // Password check - sirf kips123 chalega
+    if (password.trim() !== "kips123") {
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
-    const token = signToken({ id: user.id, username: user.username, role: user.role, name: user.name });
-    res.json({
-      token,
-      user: { id: user.id, username: user.username, role: user.role, name: user.name, email: user.email }
-    });
+
+    // User account banaao
+    const newUsername = student.username ??
+      student.name.toLowerCase().replace(/\s+/g, ".") + "." +
+      (student.admissionNumber?.split("-").pop()?.trim() ?? String(student.id));
+
+    const hashed = await hashPassword("kips123");
+
+    await db.insert(usersTable).values({
+      username: newUsername,
+      password: hashed,
+      role: "student",
+      name: student.name,
+      relatedId: student.id,
+    }).onConflictDoNothing();
+
+    if (!student.username) {
+      await db.update(studentsTable)
+        .set({ username: newUsername })
+        .where(eq(studentsTable.id, student.id));
+    }
+
+    const [newUser] = await db.select().from(usersTable)
+      .where(eq(usersTable.username, newUsername)).limit(1);
+
+    if (!newUser) {
+      res.status(500).json({ error: "Account creation failed" });
+      return;
+    }
+
+    const token = signToken({ id: newUser.id, username: newUser.username, role: "student", name: newUser.name });
+    res.json({ token, user: { id: newUser.id, username: newUser.username, role: "student", name: newUser.name, email: null } });
+
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// GET /api/auth/me
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = (req as Request & { user: Record<string, unknown> }).user;
@@ -47,22 +104,15 @@ router.get("/me", requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/auth/change-password
 router.post("/change-password", requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const reqUser = (req as Request & { user: Record<string, unknown> }).user;
-    const users = await db.select().from(usersTable).where(eq(usersTable.id, Number(reqUser.id))).limit(1);
-    if (!users.length) {
-      res.status(404).json({ error: "User not found" });
-      return;
-    }
-    const user = users[0];
+    const [user] = await db.select().from(usersTable)
+      .where(eq(usersTable.id, Number(reqUser.id))).limit(1);
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
     const valid = await comparePassword(currentPassword, user.password);
-    if (!valid) {
-      res.status(401).json({ error: "Current password is incorrect" });
-      return;
-    }
+    if (!valid) { res.status(401).json({ error: "Current password is incorrect" }); return; }
     const hashed = await hashPassword(newPassword);
     await db.update(usersTable).set({ password: hashed }).where(eq(usersTable.id, user.id));
     res.json({ message: "Password changed successfully" });
@@ -71,7 +121,5 @@ router.post("/change-password", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-import type { Request } from "express";
 
 export default router;
