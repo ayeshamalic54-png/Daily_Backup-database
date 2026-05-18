@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Camera, X, Upload } from "lucide-react";
 
 const schema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -34,11 +35,25 @@ export default function StudentNew() {
   const queryClient = useQueryClient();
   const { data: classes } = useListClasses();
   const createMutation = useCreateStudent();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: { name: "", status: "active" },
   });
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "Photo too large", description: "Please select an image under 2 MB." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setPhotoPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
 
   const onSubmit = (values: z.infer<typeof schema>) => {
     createMutation.mutate({
@@ -46,6 +61,7 @@ export default function StudentNew() {
         ...values,
         classId: Number(values.classId),
         feeAmount: values.feeAmount ? Number(values.feeAmount) : undefined,
+        imageUrl: photoPreview ?? undefined,
       }
     }, {
       onSuccess: (student) => {
@@ -71,6 +87,65 @@ export default function StudentNew() {
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+
+          {/* Photo Upload Card */}
+          <Card>
+            <CardHeader><CardTitle className="text-base">Student Photo</CardTitle></CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-6">
+                <div
+                  className="relative w-28 h-32 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center overflow-hidden cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors group"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {photoPreview ? (
+                    <>
+                      <img src={photoPreview} alt="Student" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Camera className="w-6 h-6 text-white" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-8 h-8 text-gray-400 mb-2" />
+                      <span className="text-xs text-gray-400 text-center px-2">Click to upload photo</span>
+                    </>
+                  )}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handlePhotoChange}
+                    data-testid="input-photo"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileRef.current?.click()}
+                    className="flex items-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" /> Upload Photo
+                  </Button>
+                  {photoPreview && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setPhotoPreview(null); if (fileRef.current) fileRef.current.value = ""; }}
+                      className="flex items-center gap-2 text-red-500 hover:text-red-600"
+                    >
+                      <X className="w-4 h-4" /> Remove
+                    </Button>
+                  )}
+                  <p className="text-xs text-gray-400">JPG, PNG or WEBP. Max 2 MB.<br />Passport-size photo recommended.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader><CardTitle className="text-base">Personal Information</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
