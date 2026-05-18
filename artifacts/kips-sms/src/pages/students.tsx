@@ -398,13 +398,6 @@ export default function Students() {
           </div>
         </div>
 
-        {/* Fee Reminder Banner */}
-        {!classIdFilter && allStudents && (
-          <FeeReminderBanner
-            students={(allStudents ?? []).map(s => ({ id: s.id, name: s.name, fatherName: s.fatherName, feeAmount: s.feeAmount, className: s.className }))}
-          />
-        )}
-
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           {[

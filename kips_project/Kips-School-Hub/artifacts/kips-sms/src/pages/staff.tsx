@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useListStaff, useCreateStaff, getListStaffQueryKey } from "@workspace/api-client-react";
+import { useListStaff, useCreateStaff, useUpdateStaff, getListStaffQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, User, Phone, Mail, BookOpen } from "lucide-react";
+import { Plus, Loader2, User, Phone, Mail, BookOpen, Pencil, Trash2 } from "lucide-react";
+import { useAuthStore } from "@/lib/auth";
 
 const schema = z.object({
   name: z.string().min(2, "Name required"),
@@ -35,12 +36,20 @@ const roleColors = {
 
 export default function Staff() {
   const [open, setOpen] = useState(false);
+  const [editMember, setEditMember] = useState<null | { id: number; name: string; role: string; phone?: string; email?: string; subject?: string; salary?: string | number | null; joinDate?: string; status: string }>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { token } = useAuthStore();
   const { data: staff, isLoading } = useListStaff();
   const createMutation = useCreateStaff();
+  const updateMutation = useUpdateStaff();
 
   const form = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+    defaultValues: { role: "teacher", status: "active" },
+  });
+
+  const editForm = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: { role: "teacher", status: "active" },
   });
@@ -57,6 +66,51 @@ export default function Staff() {
       },
       onError: () => toast({ variant: "destructive", title: "Failed to add staff" }),
     });
+  };
+
+  const openEdit = (member: typeof editMember) => {
+    if (!member) return;
+    setEditMember(member);
+    editForm.reset({
+      name: member.name,
+      role: member.role as "teacher" | "admin" | "accountant" | "support",
+      phone: member.phone ?? "",
+      email: member.email ?? "",
+      subject: member.subject ?? "",
+      salary: member.salary ? String(member.salary) : "",
+      joinDate: member.joinDate ?? "",
+      status: member.status as "active" | "inactive",
+    });
+  };
+
+  const onEditSubmit = (values: z.infer<typeof schema>) => {
+    if (!editMember) return;
+    updateMutation.mutate({
+      id: editMember.id,
+      data: { ...values, salary: values.salary ? Number(values.salary) : undefined }
+    }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListStaffQueryKey() });
+        toast({ title: "Staff member updated" });
+        setEditMember(null);
+      },
+      onError: () => toast({ variant: "destructive", title: "Failed to update staff" }),
+    });
+  };
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`Delete staff member "${name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/staff/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: getListStaffQueryKey() });
+      toast({ title: "Staff member deleted" });
+    } catch {
+      toast({ variant: "destructive", title: "Failed to delete staff member" });
+    }
   };
 
   return (
@@ -134,9 +188,17 @@ export default function Staff() {
                     <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center shadow-sm`}>
                       <span className="text-white font-bold text-lg">{member.name.charAt(0)}</span>
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <h3 className="font-bold text-gray-900">{member.name}</h3>
                       <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full capitalize">{member.role}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-blue-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => openEdit({ id: member.id, name: member.name, role: member.role, phone: member.phone ?? undefined, email: member.email ?? undefined, subject: member.subject ?? undefined, salary: member.salary, joinDate: member.joinDate ?? undefined, status: member.status })}>
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(member.id, member.name)}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
                   </div>
                   <div className="space-y-2 text-sm text-gray-600">
@@ -155,6 +217,60 @@ export default function Staff() {
           })}
         </div>
       )}
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editMember} onOpenChange={(open) => { if (!open) setEditMember(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Staff Member</DialogTitle></DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+              <FormField control={editForm.control} name="name" render={({ field }) => (
+                <FormItem><FormLabel>Full Name *</FormLabel><FormControl><Input placeholder="Full name" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={editForm.control} name="role" render={({ field }) => (
+                <FormItem><FormLabel>Role *</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="teacher">Teacher</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="accountant">Accountant</SelectItem>
+                      <SelectItem value="support">Support</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormItem>
+              )} />
+              <FormField control={editForm.control} name="subject" render={({ field }) => (
+                <FormItem><FormLabel>Subject</FormLabel><FormControl><Input placeholder="e.g. Mathematics" {...field} /></FormControl></FormItem>
+              )} />
+              <FormField control={editForm.control} name="phone" render={({ field }) => (
+                <FormItem><FormLabel>Phone</FormLabel><FormControl><Input placeholder="0300-1234567" {...field} /></FormControl></FormItem>
+              )} />
+              <FormField control={editForm.control} name="email" render={({ field }) => (
+                <FormItem><FormLabel>Email</FormLabel><FormControl><Input placeholder="email@kips.edu.pk" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={editForm.control} name="salary" render={({ field }) => (
+                <FormItem><FormLabel>Monthly Salary (PKR)</FormLabel><FormControl><Input type="number" placeholder="35000" {...field} /></FormControl></FormItem>
+              )} />
+              <FormField control={editForm.control} name="status" render={({ field }) => (
+                <FormItem><FormLabel>Status</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormItem>
+              )} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditMember(null)}>Cancel</Button>
+                <Button type="submit" disabled={updateMutation.isPending}>
+                  {updateMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Save Changes
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

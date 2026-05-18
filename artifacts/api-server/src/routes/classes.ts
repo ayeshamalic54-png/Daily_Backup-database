@@ -37,4 +37,32 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/classes/:id
+router.put("/:id", requireAuth, async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    const [existing] = await db.select().from(classesTable).where(eq(classesTable.id, classId));
+    if (!existing) { res.status(404).json({ error: "Class not found" }); return; }
+    const [updated] = await db.update(classesTable).set(req.body).where(eq(classesTable.id, classId)).returning();
+    res.json({ ...updated, studentCount: 0, teacherName: null });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /api/classes/:id
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    const [existing] = await db.select().from(classesTable).where(eq(classesTable.id, classId));
+    if (!existing) { res.status(404).json({ error: "Class not found" }); return; }
+    await db.delete(classesTable).where(eq(classesTable.id, classId));
+    res.status(204).send();
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

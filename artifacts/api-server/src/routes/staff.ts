@@ -59,4 +59,18 @@ router.patch("/:id", requireAuth, async (req, res) => {
   }
 });
 
+// DELETE /api/staff/:id
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const staffId = Number(req.params.id);
+    const [existing] = await db.select().from(staffTable).where(eq(staffTable.id, staffId));
+    if (!existing) { res.status(404).json({ error: "Staff not found" }); return; }
+    await db.delete(staffTable).where(eq(staffTable.id, staffId));
+    res.status(204).send();
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

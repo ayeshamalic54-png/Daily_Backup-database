@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Eye, Trash2, UserCheck, UserX, UserMinus, Printer } from "lucide-react";
+import { Plus, Search, Eye, Trash2, UserCheck, UserX, UserMinus, Printer, Pencil } from "lucide-react";
 
 const statusConfig = {
   active: { label: "Active", variant: "default" as const, icon: UserCheck, className: "bg-emerald-100 text-emerald-700 border-emerald-200" },
@@ -130,6 +130,9 @@ export default function Students() {
                           <div className="flex items-center gap-1">
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setLocation(`/students/${student.id}`)} data-testid={`button-view-student-${student.id}`}>
                               <Eye className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-blue-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setLocation(`/students/${student.id}`)} title="Edit student">
+                              <Pencil className="w-3.5 h-3.5" />
                             </Button>
                             <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(student.id, student.name)} data-testid={`button-delete-student-${student.id}`}>
                               <Trash2 className="w-3.5 h-3.5" />

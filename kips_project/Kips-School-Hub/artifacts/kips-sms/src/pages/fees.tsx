@@ -12,7 +12,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, CheckCircle, Clock, AlertCircle, Printer } from "lucide-react";
+import { Plus, Loader2, CheckCircle, Clock, AlertCircle, Printer, Pencil, Trash2 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth";
 
 const statusConfig = {
@@ -47,9 +47,10 @@ export default function Fees() {
   const [payAmount, setPayAmount] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [editFee, setEditFee] = useState<null | { id: number; amount: number; month: string; dueDate: string; fine: number }>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
   const isStudent = user?.role === "student";
 
   const { data: fees, isLoading } = useListFees(statusFilter ? { status: statusFilter as "paid" | "unpaid" | "partial" } : {});
@@ -82,6 +83,38 @@ export default function Fees() {
       },
       onError: () => toast({ variant: "destructive", title: "Failed to create fee record" }),
     });
+  };
+
+  const handleDeleteFee = async (id: number) => {
+    if (!confirm("Delete this fee record? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/fees/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: getListFeesQueryKey() });
+      toast({ title: "Fee record deleted" });
+    } catch {
+      toast({ variant: "destructive", title: "Failed to delete fee record" });
+    }
+  };
+
+  const handleEditFee = async (values: { amount: string; month: string; dueDate: string; fine: string }) => {
+    if (!editFee) return;
+    try {
+      const res = await fetch(`/api/fees/${editFee.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: Number(values.amount), month: values.month, dueDate: values.dueDate, fine: Number(values.fine) }),
+      });
+      if (!res.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: getListFeesQueryKey() });
+      toast({ title: "Fee record updated" });
+      setEditFee(null);
+    } catch {
+      toast({ variant: "destructive", title: "Failed to update fee record" });
+    }
   };
 
   const handlePay = () => {
@@ -209,9 +242,21 @@ export default function Fees() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${st.className}`}>{fee.status}</span>
                         </td>
                         <td className="py-2.5 px-3 print:hidden">
-                          {!isStudent && fee.status !== "paid" && (
-                            <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setPayOpen(fee.id); setPayAmount(String(fee.remainingAmount ?? 0)); }}>Pay</Button>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {!isStudent && fee.status !== "paid" && (
+                              <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setPayOpen(fee.id); setPayAmount(String(fee.remainingAmount ?? 0)); }}>Pay</Button>
+                            )}
+                            {!isStudent && (
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-blue-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setEditFee({ id: fee.id, amount: fee.amount, month: fee.month, dueDate: fee.dueDate ?? "", fine: fee.fine ?? 0 })} title="Edit fee">
+                                <Pencil className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            {!isStudent && (
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDeleteFee(fee.id)} title="Delete fee">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -251,6 +296,37 @@ export default function Fees() {
                 </Button>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Fee Dialog */}
+      <Dialog open={!!editFee} onOpenChange={(open) => { if (!open) setEditFee(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Fee Record</DialogTitle></DialogHeader>
+          {editFee && (
+            <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget as HTMLFormElement); handleEditFee({ amount: fd.get("amount") as string, month: fd.get("month") as string, dueDate: fd.get("dueDate") as string, fine: fd.get("fine") as string }); }} className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Amount (PKR) *</label>
+                <Input name="amount" type="number" defaultValue={editFee.amount} required />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Month *</label>
+                <Input name="month" type="month" defaultValue={editFee.month} required />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Due Date *</label>
+                <Input name="dueDate" type="date" defaultValue={editFee.dueDate} required />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Fine (PKR)</label>
+                <Input name="fine" type="number" defaultValue={editFee.fine} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditFee(null)}>Cancel</Button>
+                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white">Save Changes</Button>
+              </div>
+            </form>
           )}
         </DialogContent>
       </Dialog>

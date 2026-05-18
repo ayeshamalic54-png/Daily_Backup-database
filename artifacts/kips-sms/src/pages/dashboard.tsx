@@ -17,7 +17,7 @@ const fmt = (v: number | undefined, isCurrency?: boolean) => {
 // ── Student Dashboard ────────────────────────────────────────────────────────
 function StudentDashboard({ name }: { name: string }) {
   const { data: fees,       isLoading: feesLoading } = useListFees({});
-  const { data: attendance, isLoading: attLoading  } = useListAttendance({});
+  const { data: attendance, isLoading: attLoading  } = useListAttendance({ type: "student" });
 
   const today = new Date().toLocaleDateString("en-PK", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
@@ -158,39 +158,55 @@ function StudentDashboard({ name }: { name: string }) {
   );
 }
 
-// ── Monthly stat cards config ────────────────────────────────────────────────
-const monthlyCards = [
-  { key: "totalStudents",    label: "Total Students",   icon: GraduationCap, gradient: "from-pink-500 to-rose-500"                             },
-  { key: "totalTeachers",    label: "Total Teachers",   icon: Users,         gradient: "from-blue-500 to-cyan-500"                             },
-  { key: "monthlyIncome",    label: "Monthly Income",   icon: TrendingUp,    gradient: "from-emerald-500 to-green-500",  isCurrency: true       },
-  { key: "monthlyExpenses",  label: "Monthly Expenses", icon: TrendingDown,  gradient: "from-orange-500 to-amber-500",   isCurrency: true       },
-  { key: "netProfit",        label: "Net Profit",       icon: DollarSign,    gradient: "from-violet-500 to-purple-600",  isCurrency: true       },
-  { key: "pendingFees",      label: "Pending Fees",     icon: AlertTriangle, gradient: "from-red-500 to-rose-600",        isCurrency: true       },
-  { key: "defaulterCount",   label: "Fee Defaulters",   icon: AlertTriangle, gradient: "from-amber-400 to-orange-500"                           },
-  { key: "recentAdmissions", label: "New (30 days)",    icon: UserPlus,      gradient: "from-teal-400 to-emerald-500"                           },
-];
-
 // ── Admin Dashboard ──────────────────────────────────────────────────────────
 function AdminDashboard() {
   const { data: stats, isLoading } = useGetDashboardStats();
-
   const { data: allFees, isLoading: feesLoading } = useListFees({});
-  const todayStr = new Date().toISOString().slice(0, 10);
 
+  const todayStr     = new Date().toISOString().slice(0, 10);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  // ── Today's calculations ──
   const todayPaidFees     = (allFees ?? []).filter(f => f.paidDate?.startsWith(todayStr));
   const todayFeeAmount    = todayPaidFees.reduce((s, f) => s + (f.paidAmount ?? 0), 0);
   const todayReceiptCount = todayPaidFees.length;
-
-  // ✅ FIX: Always derive todayIncome from fee records (frontend-calculated).
-  // The backend's todayIncome field returns 0 even when fees were collected today.
-  // We take Math.max so if backend ever has extra non-fee income, we don't hide it.
-  const todayIncomeValue = Math.max(
+  const todayIncomeValue  = Math.max(
     todayFeeAmount,
     (stats?.todayIncome && (stats.todayIncome as number) > 0) ? (stats.todayIncome as number) : 0
   );
 
+  // ── Monthly calculations (from fee records — more reliable than backend) ──
+  const monthlyPaidFees   = (allFees ?? []).filter(f => f.paidDate?.startsWith(currentMonth));
+  const monthlyFeeIncome  = monthlyPaidFees.reduce((s, f) => s + (f.paidAmount ?? 0), 0);
+  const monthlyIncome     = Math.max(monthlyFeeIncome, (stats?.monthlyIncome as number) ?? 0);
+  const monthlyExpenses   = (stats?.monthlyExpenses as number) ?? 0;
+  const netProfit         = monthlyIncome - monthlyExpenses;
+  const pendingFees       = (allFees ?? [])
+    .filter(f => f.status === "unpaid" || f.status === "partial")
+    .reduce((s, f) => s + (f.remainingAmount ?? 0), 0);
+
   const today      = new Date().toLocaleDateString("en-PK", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const monthLabel = new Date().toLocaleDateString("en-PK", { month: "long", year: "numeric" });
+
+  // Helper to get corrected value for monthly stat cards
+  const getMonthlyValue = (key: string): number | undefined => {
+    if (key === "monthlyIncome")   return monthlyIncome;
+    if (key === "monthlyExpenses") return monthlyExpenses;
+    if (key === "netProfit")       return netProfit;
+    if (key === "pendingFees")     return pendingFees;
+    return stats ? (stats[key as keyof typeof stats] as number) : undefined;
+  };
+
+  const monthlyCards = [
+    { key: "totalStudents",    label: "Total Students",   icon: GraduationCap, gradient: "from-pink-500 to-rose-500"                        },
+    { key: "totalTeachers",    label: "Total Teachers",   icon: Users,         gradient: "from-blue-500 to-cyan-500"                        },
+    { key: "monthlyIncome",    label: "Monthly Income",   icon: TrendingUp,    gradient: "from-emerald-500 to-green-500",  isCurrency: true  },
+    { key: "monthlyExpenses",  label: "Monthly Expenses", icon: TrendingDown,  gradient: "from-orange-500 to-amber-500",   isCurrency: true  },
+    { key: "netProfit",        label: "Net Profit",       icon: DollarSign,    gradient: "from-violet-500 to-purple-600",  isCurrency: true  },
+    { key: "pendingFees",      label: "Pending Fees",     icon: AlertTriangle, gradient: "from-red-500 to-rose-600",        isCurrency: true  },
+    { key: "defaulterCount",   label: "Fee Defaulters",   icon: AlertTriangle, gradient: "from-amber-400 to-orange-500"                      },
+    { key: "recentAdmissions", label: "New (30 days)",    icon: UserPlus,      gradient: "from-teal-400 to-emerald-500"                      },
+  ];
 
   return (
     <div className="space-y-7">
@@ -210,26 +226,10 @@ function AdminDashboard() {
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            {
-              label: "Today's Income",
-              value: todayIncomeValue,          // ✅ FIXED
-              icon: Banknote, gradient: "from-emerald-500 to-teal-500", isCurrency: true,
-            },
-            {
-              label: "Today's Expenses",
-              value: (stats?.todayExpenses as number | undefined) ?? 0,
-              icon: TrendingDown, gradient: "from-red-500 to-rose-600", isCurrency: true,
-            },
-            {
-              label: "Fees Collected",
-              value: todayFeeAmount,            // ✅ FIXED — same reliable source
-              icon: ReceiptText, gradient: "from-blue-500 to-cyan-500", isCurrency: true,
-            },
-            {
-              label: "Receipts Today",
-              value: todayReceiptCount,
-              icon: BookOpen, gradient: "from-violet-500 to-purple-600", isCurrency: false,
-            },
+            { label: "Today's Income",   value: todayIncomeValue,  icon: Banknote,    gradient: "from-emerald-500 to-teal-500",   isCurrency: true  },
+            { label: "Today's Expenses", value: (stats?.todayExpenses as number) ?? 0, icon: TrendingDown, gradient: "from-red-500 to-rose-600", isCurrency: true },
+            { label: "Fees Collected",   value: todayFeeAmount,    icon: ReceiptText, gradient: "from-blue-500 to-cyan-500",      isCurrency: true  },
+            { label: "Receipts Today",   value: todayReceiptCount, icon: BookOpen,    gradient: "from-violet-500 to-purple-600",  isCurrency: false },
           ].map(card => (
             <motion.div key={card.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <Card className="overflow-hidden border-0 shadow-sm hover:shadow-md transition-shadow">
@@ -266,7 +266,7 @@ function AdminDashboard() {
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {monthlyCards.map((card, i) => {
-            const value = stats ? stats[card.key as keyof typeof stats] as number : undefined;
+            const value = getMonthlyValue(card.key);
             return (
               <motion.div key={card.key} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: i * 0.04 }}>
                 <Card className="overflow-hidden border-0 shadow-sm hover:shadow-md transition-shadow">
@@ -275,7 +275,7 @@ function AdminDashboard() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{card.label}</p>
-                          {isLoading
+                          {isLoading || feesLoading
                             ? <Skeleton className="h-7 w-24 mt-1 bg-white/30" />
                             : <p className="text-white text-2xl font-bold mt-1">
                                 {fmt(value, (card as { isCurrency?: boolean }).isCurrency)}
@@ -339,19 +339,18 @@ function AdminDashboard() {
             ) : (
               <div className="space-y-2">
                 {[
-                  // ✅ FIXED: Today's Income now appears in Financial Summary
-                  { label: "Today's Income",   value: todayIncomeValue,       color: "bg-teal-500"    },
-                  { label: "Monthly Income",   value: stats?.monthlyIncome,   color: "bg-emerald-500" },
-                  { label: "Monthly Expenses", value: stats?.monthlyExpenses, color: "bg-red-500"     },
-                  { label: "Net Profit",       value: stats?.netProfit,       color: "bg-violet-500"  },
-                  { label: "Pending Fees",     value: stats?.pendingFees,     color: "bg-amber-500"   },
+                  { label: "Today's Income",   value: todayIncomeValue, color: "bg-teal-500"    },
+                  { label: "Monthly Income",   value: monthlyIncome,    color: "bg-emerald-500" },
+                  { label: "Monthly Expenses", value: monthlyExpenses,  color: "bg-red-500"     },
+                  { label: "Net Profit",       value: netProfit,        color: "bg-violet-500"  },
+                  { label: "Pending Fees",     value: pendingFees,      color: "bg-amber-500"   },
                 ].map(item => (
                   <div key={item.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center gap-3">
                       <div className={`w-1.5 h-8 ${item.color} rounded-full`} />
                       <span className="text-sm font-medium text-gray-700">{item.label}</span>
                     </div>
-                    <span className="text-lg font-bold text-gray-900">
+                    <span className={`text-lg font-bold ${item.value < 0 ? "text-red-600" : "text-gray-900"}`}>
                       PKR {((item.value as number) ?? 0).toLocaleString()}
                     </span>
                   </div>

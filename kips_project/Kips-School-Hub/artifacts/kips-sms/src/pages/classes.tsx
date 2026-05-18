@@ -3,7 +3,7 @@ import { useListClasses, useCreateClass, getListClassesQueryKey } from "@workspa
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +11,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, BookOpen, Users, Loader2 } from "lucide-react";
+import { Plus, BookOpen, Users, Loader2, Pencil, Trash2 } from "lucide-react";
+import { useAuthStore } from "@/lib/auth";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -21,12 +22,19 @@ const schema = z.object({
 
 export default function Classes() {
   const [open, setOpen] = useState(false);
+  const [editClass, setEditClass] = useState<null | { id: number; name: string; grade: string; sections?: string | null }>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { token } = useAuthStore();
   const { data: classes, isLoading } = useListClasses();
   const createMutation = useCreateClass();
 
   const form = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+    defaultValues: { name: "", grade: "", sections: "" },
+  });
+
+  const editForm = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: { name: "", grade: "", sections: "" },
   });
@@ -41,6 +49,44 @@ export default function Classes() {
       },
       onError: () => toast({ variant: "destructive", title: "Failed to create class" }),
     });
+  };
+
+  const openEdit = (cls: typeof editClass) => {
+    if (!cls) return;
+    setEditClass(cls);
+    editForm.reset({ name: cls.name, grade: cls.grade, sections: cls.sections ?? "" });
+  };
+
+  const onEditSubmit = async (values: z.infer<typeof schema>) => {
+    if (!editClass) return;
+    try {
+      const res = await fetch(`/api/classes/${editClass.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(values),
+      });
+      if (!res.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: getListClassesQueryKey() });
+      toast({ title: "Class updated" });
+      setEditClass(null);
+    } catch {
+      toast({ variant: "destructive", title: "Failed to update class" });
+    }
+  };
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`Delete class "${name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/classes/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: getListClassesQueryKey() });
+      toast({ title: "Class deleted" });
+    } catch {
+      toast({ variant: "destructive", title: "Failed to delete class" });
+    }
   };
 
   return (
@@ -87,16 +133,26 @@ export default function Classes() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {classes?.map(cls => (
+          {!classes?.length ? (
+            <div className="col-span-full text-center py-16 text-gray-500">No classes found. Add one to get started.</div>
+          ) : classes?.map(cls => (
             <Card key={cls.id} className="hover:shadow-md transition-shadow" data-testid={`card-class-${cls.id}`}>
               <CardContent className="p-5">
                 <div className="flex items-start justify-between">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center shadow-sm">
                     <BookOpen className="w-5 h-5 text-white" />
                   </div>
-                  <div className="flex items-center gap-1 text-gray-500 text-sm">
-                    <Users className="w-3.5 h-3.5" />
-                    <span>{cls.studentCount}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 text-gray-500 text-sm">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>{cls.studentCount}</span>
+                    </div>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-blue-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => openEdit({ id: cls.id, name: cls.name, grade: cls.grade, sections: cls.sections })}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(cls.id, cls.name)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
                 </div>
                 <h3 className="mt-3 font-bold text-gray-900">{cls.name}</h3>
@@ -113,6 +169,30 @@ export default function Classes() {
           ))}
         </div>
       )}
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editClass} onOpenChange={(open) => { if (!open) setEditClass(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Class</DialogTitle></DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+              <FormField control={editForm.control} name="name" render={({ field }) => (
+                <FormItem><FormLabel>Class Name *</FormLabel><FormControl><Input placeholder="e.g. Class 6" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={editForm.control} name="grade" render={({ field }) => (
+                <FormItem><FormLabel>Grade *</FormLabel><FormControl><Input placeholder="e.g. Grade 6" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={editForm.control} name="sections" render={({ field }) => (
+                <FormItem><FormLabel>Sections (comma-separated)</FormLabel><FormControl><Input placeholder="A,B,C" {...field} /></FormControl></FormItem>
+              )} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditClass(null)}>Cancel</Button>
+                <Button type="submit">Save Changes</Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
