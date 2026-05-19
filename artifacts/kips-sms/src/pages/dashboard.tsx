@@ -275,9 +275,9 @@ function AdminDashboard() {
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Fee Income",       value: todayFeeAmount,    icon: Banknote,    gradient: "from-emerald-500 to-teal-500",  isCurrency: true  },
+            { label: "Fees Collected",   value: todayFeeAmount,    icon: ReceiptText, gradient: "from-emerald-500 to-teal-500",  isCurrency: true  },
+            { label: "Pending Fees",     value: pendingFees,       icon: AlertTriangle, gradient: "from-amber-500 to-orange-500", isCurrency: true },
             { label: "Other Expenses",   value: (periods?.today?.otherExpenses ?? 0), icon: TrendingDown, gradient: "from-red-500 to-rose-600", isCurrency: true },
-            { label: "Fees Collected",   value: todayFeeAmount,    icon: ReceiptText, gradient: "from-blue-500 to-cyan-500",     isCurrency: true  },
             { label: "Receipts Today",   value: todayReceiptCount, icon: FileText,    gradient: "from-violet-500 to-purple-600", isCurrency: false },
           ].map(card => (
             <motion.div key={card.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
