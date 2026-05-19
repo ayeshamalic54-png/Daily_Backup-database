@@ -1,4 +1,4 @@
-name: Daily Neon Backup
+name: Neon Daily Backup
 
 on:
   workflow_dispatch:
@@ -12,11 +12,32 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
-      - name: Run backup
+      - name: Check secret exists
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          mkdir -p backups
+          if [ -z "$DATABASE_URL" ]; then
+            echo "❌ DATABASE_URL missing"
+            exit 1
+          else
+            echo "✅ DATABASE_URL loaded"
+          fi
+
+      - name: Create backup folder
+        run: mkdir -p backups
+
+      - name: Run pg_dump backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
           pg_dump "$DATABASE_URL" > backups/backup.sql
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup
+          path: backups/
