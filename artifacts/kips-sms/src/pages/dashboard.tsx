@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useGetDashboardStats, useListFees, useListAttendance } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,6 +9,8 @@ import {
   ReceiptText, Clock, CheckCircle, XCircle, CreditCard, FileText,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth";
+
+type Period = "today" | "weekly" | "monthly" | "yearly";
 
 const fmt = (v: number | undefined, isCurrency?: boolean) => {
   if (v === undefined || v === null) return "—";
@@ -162,74 +165,86 @@ function StudentDashboard({ name }: { name: string }) {
 function AdminDashboard() {
   const { data: stats, isLoading } = useGetDashboardStats();
   const { data: allFees, isLoading: feesLoading } = useListFees({});
+  const [period, setPeriod] = useState<Period>("monthly");
 
   const todayStr     = new Date().toISOString().slice(0, 10);
   const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentYear  = new Date().toISOString().slice(0, 4);
+  const todayLabel   = new Date().toLocaleDateString("en-PK", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const monthLabel   = new Date().toLocaleDateString("en-PK", { month: "long", year: "numeric" });
 
-  // ── Today's calculations ──
+  // ── Today receipts (from fee records) ──
   const todayPaidFees     = (allFees ?? []).filter(f => f.paidDate?.startsWith(todayStr));
   const todayFeeAmount    = todayPaidFees.reduce((s, f) => s + (f.paidAmount ?? 0), 0);
   const todayReceiptCount = todayPaidFees.length;
-  const todayIncomeValue  = Math.max(
-    todayFeeAmount,
-    (stats?.todayIncome && (stats.todayIncome as number) > 0) ? (stats.todayIncome as number) : 0
-  );
 
-  // ── Monthly calculations (from fee records — more reliable than backend) ──
-  const monthlyPaidFees   = (allFees ?? []).filter(f => f.paidDate?.startsWith(currentMonth));
-  const monthlyFeeIncome  = monthlyPaidFees.reduce((s, f) => s + (f.paidAmount ?? 0), 0);
-  const monthlyIncome     = Math.max(monthlyFeeIncome, (stats?.monthlyIncome as number) ?? 0);
-  const monthlyExpenses   = (stats?.monthlyExpenses as number) ?? 0;
-  const netProfit         = monthlyIncome - monthlyExpenses;
-  const pendingFees       = (allFees ?? [])
+  // ── Pending fees ──
+  const pendingFees = (allFees ?? [])
     .filter(f => f.status === "unpaid" || f.status === "partial")
     .reduce((s, f) => s + (f.remainingAmount ?? 0), 0);
 
-  const today      = new Date().toLocaleDateString("en-PK", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const monthLabel = new Date().toLocaleDateString("en-PK", { month: "long", year: "numeric" });
+  // ── Period data from backend ──
+  type PeriodData = {
+    feeIncome: number; otherIncome: number; otherExpenses: number;
+    salaryExpenses: number; totalIncome: number; totalExpenses: number; netProfit: number;
+  };
+  const emptyPeriod: PeriodData = {
+    feeIncome: 0, otherIncome: 0, otherExpenses: 0,
+    salaryExpenses: 0, totalIncome: 0, totalExpenses: 0, netProfit: 0,
+  };
+  const periods = (stats as { periods?: Record<Period, PeriodData> } | undefined)?.periods;
+  const pd = periods?.[period] ?? emptyPeriod;
 
-  // Helper to get corrected value for monthly stat cards
-  const getMonthlyValue = (key: string): number | undefined => {
-    if (key === "monthlyIncome")   return monthlyIncome;
-    if (key === "monthlyExpenses") return monthlyExpenses;
-    if (key === "netProfit")       return netProfit;
-    if (key === "pendingFees")     return pendingFees;
-    return stats ? (stats[key as keyof typeof stats] as number) : undefined;
+  // Supplement today feeIncome from live fee records (more accurate)
+  const livePd: PeriodData = period === "today"
+    ? { ...pd, feeIncome: Math.max(pd.feeIncome, todayFeeAmount), totalIncome: Math.max(pd.feeIncome, todayFeeAmount) + pd.otherIncome }
+    : period === "monthly"
+    ? (() => {
+        const liveFeeIncome = Math.max(
+          pd.feeIncome,
+          (allFees ?? []).filter(f => f.paidDate?.startsWith(currentMonth)).reduce((s, f) => s + (f.paidAmount ?? 0), 0),
+        );
+        return { ...pd, feeIncome: liveFeeIncome, totalIncome: liveFeeIncome + pd.otherIncome, netProfit: liveFeeIncome + pd.otherIncome - pd.totalExpenses };
+      })()
+    : pd;
+
+  const periodLabels: Record<Period, string> = {
+    today:   "Today",
+    weekly:  "This Week",
+    monthly: monthLabel,
+    yearly:  `Year ${currentYear}`,
   };
 
-  const monthlyCards = [
-    { key: "totalStudents",    label: "Total Students",   icon: GraduationCap, gradient: "from-pink-500 to-rose-500"                        },
-    { key: "totalTeachers",    label: "Total Teachers",   icon: Users,         gradient: "from-blue-500 to-cyan-500"                        },
-    { key: "monthlyIncome",    label: "Monthly Income",   icon: TrendingUp,    gradient: "from-emerald-500 to-green-500",  isCurrency: true  },
-    { key: "monthlyExpenses",  label: "Monthly Expenses", icon: TrendingDown,  gradient: "from-orange-500 to-amber-500",   isCurrency: true  },
-    { key: "netProfit",        label: "Net Profit",       icon: DollarSign,    gradient: "from-violet-500 to-purple-600",  isCurrency: true  },
-    { key: "pendingFees",      label: "Pending Fees",     icon: AlertTriangle, gradient: "from-red-500 to-rose-600",        isCurrency: true  },
-    { key: "defaulterCount",   label: "Fee Defaulters",   icon: AlertTriangle, gradient: "from-amber-400 to-orange-500"                      },
-    { key: "recentAdmissions", label: "New (30 days)",    icon: UserPlus,      gradient: "from-teal-400 to-emerald-500"                      },
+  const periodBtns: { key: Period; label: string }[] = [
+    { key: "today",   label: "Today"    },
+    { key: "weekly",  label: "Weekly"   },
+    { key: "monthly", label: "Monthly"  },
+    { key: "yearly",  label: "Yearly"   },
   ];
+
+  const loading = isLoading || feesLoading;
 
   return (
     <div className="space-y-7">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-400 text-sm mt-0.5 flex items-center gap-1.5">
-            <CalendarDays className="w-3.5 h-3.5" /> {today}
-          </p>
-        </div>
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-400 text-sm mt-0.5 flex items-center gap-1.5">
+          <CalendarDays className="w-3.5 h-3.5" /> {todayLabel}
+        </p>
       </div>
 
-      {/* Today's Activity */}
+      {/* School Overview */}
       <div>
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-          <Clock className="w-4 h-4" /> Today's Activity
+          <BookOpen className="w-4 h-4" /> School Overview
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: "Today's Income",   value: todayIncomeValue,  icon: Banknote,    gradient: "from-emerald-500 to-teal-500",   isCurrency: true  },
-            { label: "Today's Expenses", value: (stats?.todayExpenses as number) ?? 0, icon: TrendingDown, gradient: "from-red-500 to-rose-600", isCurrency: true },
-            { label: "Fees Collected",   value: todayFeeAmount,    icon: ReceiptText, gradient: "from-blue-500 to-cyan-500",      isCurrency: true  },
-            { label: "Receipts Today",   value: todayReceiptCount, icon: BookOpen,    gradient: "from-violet-500 to-purple-600",  isCurrency: false },
+            { label: "Total Students",  value: stats?.totalStudents,   icon: GraduationCap, gradient: "from-pink-500 to-rose-500"      },
+            { label: "Total Teachers",  value: stats?.totalTeachers,   icon: Users,         gradient: "from-blue-500 to-cyan-500"      },
+            { label: "Total Classes",   value: stats?.totalClasses,    icon: BookOpen,      gradient: "from-indigo-500 to-purple-500"  },
+            { label: "Fee Defaulters",  value: stats?.defaulterCount,  icon: AlertTriangle, gradient: "from-amber-400 to-orange-500"   },
           ].map(card => (
             <motion.div key={card.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
               <Card className="overflow-hidden border-0 shadow-sm hover:shadow-md transition-shadow">
@@ -238,18 +253,12 @@ function AdminDashboard() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{card.label}</p>
-                        {isLoading || feesLoading
-                          ? <Skeleton className="h-6 w-20 mt-1 bg-white/30" />
-                          : <p className="text-white text-xl font-bold mt-1">
-                              {card.isCurrency
-                                ? `PKR ${(card.value ?? 0).toLocaleString()}`
-                                : (card.value ?? 0).toLocaleString()}
-                            </p>
+                        {loading
+                          ? <Skeleton className="h-7 w-20 mt-1 bg-white/30" />
+                          : <p className="text-white text-2xl font-bold mt-1">{fmt(card.value as number)}</p>
                         }
                       </div>
-                      <div className="bg-white/20 rounded-xl p-2">
-                        <card.icon className="w-5 h-5 text-white" />
-                      </div>
+                      <div className="bg-white/20 rounded-xl p-2"><card.icon className="w-6 h-6 text-white" /></div>
                     </div>
                   </div>
                 </CardContent>
@@ -259,104 +268,178 @@ function AdminDashboard() {
         </div>
       </div>
 
-      {/* Monthly Stats */}
+      {/* Today Quick Stats */}
       <div>
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-          <CalendarDays className="w-4 h-4" /> {monthLabel} — Monthly Overview
+          <Clock className="w-4 h-4" /> Today's Activity
         </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {monthlyCards.map((card, i) => {
-            const value = getMonthlyValue(card.key);
-            return (
-              <motion.div key={card.key} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: i * 0.04 }}>
-                <Card className="overflow-hidden border-0 shadow-sm hover:shadow-md transition-shadow">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Fee Income",       value: todayFeeAmount,    icon: Banknote,    gradient: "from-emerald-500 to-teal-500",  isCurrency: true  },
+            { label: "Other Expenses",   value: (periods?.today?.otherExpenses ?? 0), icon: TrendingDown, gradient: "from-red-500 to-rose-600", isCurrency: true },
+            { label: "Fees Collected",   value: todayFeeAmount,    icon: ReceiptText, gradient: "from-blue-500 to-cyan-500",     isCurrency: true  },
+            { label: "Receipts Today",   value: todayReceiptCount, icon: FileText,    gradient: "from-violet-500 to-purple-600", isCurrency: false },
+          ].map(card => (
+            <motion.div key={card.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+              <Card className="overflow-hidden border-0 shadow-sm hover:shadow-md transition-shadow">
+                <CardContent className="p-0">
+                  <div className={`bg-gradient-to-br ${card.gradient} p-4`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{card.label}</p>
+                        {loading
+                          ? <Skeleton className="h-6 w-20 mt-1 bg-white/30" />
+                          : <p className="text-white text-xl font-bold mt-1">
+                              {card.isCurrency ? `PKR ${(card.value ?? 0).toLocaleString()}` : (card.value ?? 0).toLocaleString()}
+                            </p>
+                        }
+                      </div>
+                      <div className="bg-white/20 rounded-xl p-2"><card.icon className="w-5 h-5 text-white" /></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+
+      {/* Financial Summary with Period Selector */}
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+            <DollarSign className="w-4 h-4" /> Financial Summary
+          </h2>
+          {/* Period selector */}
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+            {periodBtns.map(btn => (
+              <button
+                key={btn.key}
+                onClick={() => setPeriod(btn.key)}
+                className={`px-4 py-1.5 text-xs font-semibold transition-all ${
+                  period === btn.key
+                    ? "bg-[#1a2a5e] text-white"
+                    : "text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 6 Financial Cards: Income row + Expenses row */}
+        <div className="space-y-3">
+          {/* Income row */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Fee Income",    value: livePd.feeIncome,   icon: CreditCard,  gradient: "from-blue-600 to-cyan-500"      },
+              { label: "Other Income",  value: livePd.otherIncome, icon: TrendingUp,  gradient: "from-teal-500 to-emerald-400"   },
+              { label: "Total Income",  value: livePd.totalIncome, icon: Banknote,    gradient: "from-emerald-600 to-green-500"  },
+            ].map(card => (
+              <motion.div key={card.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+                <Card className="overflow-hidden border-0 shadow-sm">
                   <CardContent className="p-0">
                     <div className={`bg-gradient-to-br ${card.gradient} p-4`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{card.label}</p>
-                          {isLoading || feesLoading
-                            ? <Skeleton className="h-7 w-24 mt-1 bg-white/30" />
-                            : <p className="text-white text-2xl font-bold mt-1">
-                                {fmt(value, (card as { isCurrency?: boolean }).isCurrency)}
-                              </p>
+                          {loading
+                            ? <Skeleton className="h-6 w-20 mt-1 bg-white/30" />
+                            : <p className="text-white text-xl font-bold mt-1">PKR {card.value.toLocaleString()}</p>
                           }
                         </div>
-                        <div className="bg-white/20 rounded-xl p-2">
-                          <card.icon className="w-6 h-6 text-white" />
-                        </div>
+                        <div className="bg-white/20 rounded-xl p-2"><card.icon className="w-5 h-5 text-white" /></div>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
               </motion.div>
-            );
-          })}
+            ))}
+          </div>
+
+          {/* Expenses row */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Salary Expenses", value: livePd.salaryExpenses, icon: Users,        gradient: "from-orange-500 to-amber-400"  },
+              { label: "Other Expenses",  value: livePd.otherExpenses,  icon: TrendingDown, gradient: "from-red-400 to-rose-500"      },
+              { label: "Total Expenses",  value: livePd.totalExpenses,  icon: AlertTriangle, gradient: "from-red-600 to-rose-600"     },
+            ].map(card => (
+              <motion.div key={card.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+                <Card className="overflow-hidden border-0 shadow-sm">
+                  <CardContent className="p-0">
+                    <div className={`bg-gradient-to-br ${card.gradient} p-4`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{card.label}</p>
+                          {loading
+                            ? <Skeleton className="h-6 w-20 mt-1 bg-white/30" />
+                            : <p className="text-white text-xl font-bold mt-1">PKR {card.value.toLocaleString()}</p>
+                          }
+                        </div>
+                        <div className="bg-white/20 rounded-xl p-2"><card.icon className="w-5 h-5 text-white" /></div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Net Profit banner */}
+          {!loading && (
+            <div className={`rounded-xl p-5 flex items-center justify-between shadow-sm ${
+              livePd.netProfit >= 0
+                ? "bg-gradient-to-r from-violet-600 to-purple-600"
+                : "bg-gradient-to-r from-gray-700 to-gray-800"
+            }`}>
+              <div>
+                <p className="text-white/70 text-xs font-semibold uppercase tracking-wide mb-1">Net Profit — {periodLabels[period]}</p>
+                <p className="text-white/60 text-xs">
+                  Fee Income PKR {livePd.feeIncome.toLocaleString()}
+                  {" + "}Other PKR {livePd.otherIncome.toLocaleString()}
+                  {" − "}Salaries PKR {livePd.salaryExpenses.toLocaleString()}
+                  {" − "}Other Exp PKR {livePd.otherExpenses.toLocaleString()}
+                </p>
+              </div>
+              <p className="text-white text-3xl font-black">
+                PKR {livePd.netProfit.toLocaleString()}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-purple-600" /> School Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">{[1,2,3,4].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
-            ) : (
-              <div className="space-y-2">
-                {[
-                  { label: "Active Students", value: stats?.activeStudents,  color: "bg-blue-500"    },
-                  { label: "Total Classes",   value: stats?.totalClasses,    color: "bg-purple-500"  },
-                  { label: "Total Teachers",  value: stats?.totalTeachers,   color: "bg-emerald-500" },
-                  { label: "Fee Defaulters",  value: `${stats?.defaulterCount ?? "—"} students`, color: "bg-red-500" },
-                ].map(item => (
-                  <div key={item.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-1.5 h-8 ${item.color} rounded-full`} />
-                      <span className="text-sm font-medium text-gray-700">{item.label}</span>
-                    </div>
-                    <span className="text-lg font-bold text-gray-900">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+      {/* Pending Fees + Recent Info */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card className="border border-amber-200 bg-amber-50">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-amber-500 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Pending Fees</p>
+              {loading
+                ? <Skeleton className="h-7 w-28 mt-1" />
+                : <p className="text-2xl font-black text-amber-800">PKR {pendingFees.toLocaleString()}</p>
+              }
+              <p className="text-xs text-amber-600 mt-0.5">{stats?.defaulterCount ?? "—"} defaulters</p>
+            </div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-emerald-600" /> Financial Summary — {monthLabel}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading || feesLoading ? (
-              <div className="space-y-3">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
-            ) : (
-              <div className="space-y-2">
-                {[
-                  { label: "Today's Income",   value: todayIncomeValue, color: "bg-teal-500"    },
-                  { label: "Monthly Income",   value: monthlyIncome,    color: "bg-emerald-500" },
-                  { label: "Monthly Expenses", value: monthlyExpenses,  color: "bg-red-500"     },
-                  { label: "Net Profit",       value: netProfit,        color: "bg-violet-500"  },
-                  { label: "Pending Fees",     value: pendingFees,      color: "bg-amber-500"   },
-                ].map(item => (
-                  <div key={item.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-1.5 h-8 ${item.color} rounded-full`} />
-                      <span className="text-sm font-medium text-gray-700">{item.label}</span>
-                    </div>
-                    <span className={`text-lg font-bold ${item.value < 0 ? "text-red-600" : "text-gray-900"}`}>
-                      PKR {((item.value as number) ?? 0).toLocaleString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+        <Card className="border border-teal-200 bg-teal-50">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-teal-500 flex items-center justify-center shrink-0">
+              <UserPlus className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide">New Admissions</p>
+              {loading
+                ? <Skeleton className="h-7 w-16 mt-1" />
+                : <p className="text-2xl font-black text-teal-800">{stats?.recentAdmissions ?? "—"}</p>
+              }
+              <p className="text-xs text-teal-600 mt-0.5">In the last 30 days</p>
+            </div>
           </CardContent>
         </Card>
       </div>

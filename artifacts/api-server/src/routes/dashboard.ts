@@ -1,7 +1,3 @@
-// ============================================================
-// FILE PATH: artifacts/api-server/src/routes/dashboard.ts
-// TASK 7: Monthly expenses mein salary bhi shamil hai
-// ============================================================
 import { Router } from "express";
 import { db } from "@workspace/db";
 import {
@@ -12,7 +8,7 @@ import {
   accountEntriesTable,
   salariesTable,
 } from "@workspace/db";
-import { eq, and, like, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 
 const router = Router();
@@ -20,10 +16,14 @@ const router = Router();
 // GET /api/dashboard/stats
 router.get("/stats", requireAuth, async (req, res) => {
   try {
-    const today        = new Date().toISOString().slice(0, 10);       // "2026-05-18"
-    const currentMonth = new Date().toISOString().slice(0, 7);        // "2026-05"
+    const now           = new Date();
+    const today         = now.toISOString().slice(0, 10);
+    const currentMonth  = now.toISOString().slice(0, 7);
+    const currentYear   = now.toISOString().slice(0, 4);
+    const sevenDaysAgo  = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    // ── Student counts ──────────────────────────────────────────────────────
+    // ── Counts ────────────────────────────────────────────────────────────────
     const [{ totalStudents }] = await db
       .select({ totalStudents: sql<number>`count(*)` })
       .from(studentsTable);
@@ -33,9 +33,6 @@ router.get("/stats", requireAuth, async (req, res) => {
       .from(studentsTable)
       .where(eq(studentsTable.status, "active"));
 
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
     const [{ recentAdmissions }] = await db
       .select({ recentAdmissions: sql<number>`count(*)` })
       .from(studentsTable)
@@ -46,78 +43,96 @@ router.get("/stats", requireAuth, async (req, res) => {
       .from(feesTable)
       .where(sql`${feesTable.status} in ('unpaid','partial')`);
 
-    // ── Staff counts ────────────────────────────────────────────────────────
     const [{ totalTeachers }] = await db
       .select({ totalTeachers: sql<number>`count(*)` })
       .from(staffTable)
       .where(and(eq(staffTable.role, "teacher"), eq(staffTable.status, "active")));
 
-    // ── Class count ─────────────────────────────────────────────────────────
     const [{ totalClasses }] = await db
       .select({ totalClasses: sql<number>`count(*)` })
       .from(classesTable);
 
-    // ── Fee income ──────────────────────────────────────────────────────────
-    const todayFees = await db
-      .select({ paidAmount: feesTable.paidAmount })
-      .from(feesTable)
-      .where(eq(feesTable.paidDate, today));
-    const todayFeeIncome = todayFees.reduce((s, f) => s + Number(f.paidAmount ?? 0), 0);
-
-    const monthFees = await db
-      .select({ paidAmount: feesTable.paidAmount })
-      .from(feesTable)
-      .where(like(feesTable.paidDate, `${currentMonth}%`));
-    const monthFeeIncome = monthFees.reduce((s, f) => s + Number(f.paidAmount ?? 0), 0);
-
-    // Pending fees (amount - paid_amount = remaining)
+    // ── Pending fees ──────────────────────────────────────────────────────────
     const unpaidFees = await db
       .select({ amount: feesTable.amount, paidAmount: feesTable.paidAmount })
       .from(feesTable)
       .where(sql`${feesTable.status} in ('unpaid','partial')`);
-    const pendingFees = unpaidFees.reduce((s, f) => s + Math.max(0, Number(f.amount ?? 0) - Number(f.paidAmount ?? 0)), 0);
+    const pendingFees = unpaidFees.reduce(
+      (s, f) => s + Math.max(0, Number(f.amount ?? 0) - Number(f.paidAmount ?? 0)),
+      0,
+    );
 
-    // ── Account entries (manual income / expense) ───────────────────────────
-    const todayEntries = await db
-      .select({ type: accountEntriesTable.type, amount: accountEntriesTable.amount })
-      .from(accountEntriesTable)
-      .where(eq(accountEntriesTable.date, today));
+    // ── Load all data once for period calculations ────────────────────────────
+    const allPaidFees = await db
+      .select({ paidAmount: feesTable.paidAmount, paidDate: feesTable.paidDate })
+      .from(feesTable)
+      .where(sql`${feesTable.paidDate} is not null`);
 
-    const todayEntryIncome   = todayEntries
-      .filter(e => e.type === "income")
-      .reduce((s, e) => s + Number(e.amount), 0);
-    const todayEntryExpenses = todayEntries
-      .filter(e => e.type === "expense")
-      .reduce((s, e) => s + Number(e.amount), 0);
+    const allEntries = await db
+      .select({
+        type:   accountEntriesTable.type,
+        amount: accountEntriesTable.amount,
+        date:   accountEntriesTable.date,
+      })
+      .from(accountEntriesTable);
 
-    const monthEntries = await db
-      .select({ type: accountEntriesTable.type, amount: accountEntriesTable.amount })
-      .from(accountEntriesTable)
-      .where(like(accountEntriesTable.date, `${currentMonth}%`));
-
-    const monthEntryIncome   = monthEntries
-      .filter(e => e.type === "income")
-      .reduce((s, e) => s + Number(e.amount), 0);
-    const monthEntryExpenses = monthEntries
-      .filter(e => e.type === "expense")
-      .reduce((s, e) => s + Number(e.amount), 0);
-
-    // ── TASK 7: Salary expenses included in monthly expenses ────────────────
-    const monthlySalaries = await db
-      .select({ amount: salariesTable.amount, status: salariesTable.status })
+    const allPaidSalaries = await db
+      .select({ amount: salariesTable.amount, month: salariesTable.month })
       .from(salariesTable)
-      .where(like(salariesTable.month, `${currentMonth}%`));
+      .where(eq(salariesTable.status, "paid"));
 
-    const salaryExpenses = monthlySalaries
-      .filter(s => s.status === "paid")
-      .reduce((sum, s) => sum + Number(s.amount ?? 0), 0);
+    // ── Period calculator ─────────────────────────────────────────────────────
+    const calcPeriod = (
+      feeDateFilter:   (d: string) => boolean,
+      entryDateFilter: (d: string) => boolean,
+      salaryFilter:    (m: string) => boolean,
+    ) => {
+      const feeIncome = allPaidFees
+        .filter(f => f.paidDate && feeDateFilter(f.paidDate))
+        .reduce((s, f) => s + Number(f.paidAmount ?? 0), 0);
 
-    // ── Totals ──────────────────────────────────────────────────────────────
-    const todayIncome     = todayFeeIncome + todayEntryIncome;
-    const todayExpenses   = todayEntryExpenses;
-    const monthlyIncome   = monthFeeIncome + monthEntryIncome;
-    const monthlyExpenses = monthEntryExpenses + salaryExpenses; // ← salaries included
-    const netProfit       = monthlyIncome - monthlyExpenses;
+      const otherIncome = allEntries
+        .filter(e => e.type === "income" && entryDateFilter(e.date))
+        .reduce((s, e) => s + Number(e.amount), 0);
+
+      const otherExpenses = allEntries
+        .filter(e => e.type === "expense" && entryDateFilter(e.date))
+        .reduce((s, e) => s + Number(e.amount), 0);
+
+      const salaryExpenses = allPaidSalaries
+        .filter(s => s.month && salaryFilter(s.month))
+        .reduce((s, sal) => s + Number(sal.amount ?? 0), 0);
+
+      const totalIncome   = feeIncome + otherIncome;
+      const totalExpenses = otherExpenses + salaryExpenses;
+      return {
+        feeIncome, otherIncome, otherExpenses, salaryExpenses,
+        totalIncome, totalExpenses, netProfit: totalIncome - totalExpenses,
+      };
+    };
+
+    const periods = {
+      today:   calcPeriod(
+        d => d === today,
+        d => d === today,
+        () => false,
+      ),
+      weekly:  calcPeriod(
+        d => d >= sevenDaysAgo,
+        d => d >= sevenDaysAgo,
+        () => false,
+      ),
+      monthly: calcPeriod(
+        d => d.startsWith(currentMonth),
+        d => d.startsWith(currentMonth),
+        m => m.startsWith(currentMonth),
+      ),
+      yearly:  calcPeriod(
+        d => d.startsWith(currentYear),
+        d => d.startsWith(currentYear),
+        m => m.startsWith(currentYear),
+      ),
+    };
 
     res.json({
       totalStudents:    Number(totalStudents),
@@ -127,11 +142,14 @@ router.get("/stats", requireAuth, async (req, res) => {
       recentAdmissions: Number(recentAdmissions),
       defaulterCount:   Number(defaulterCount),
       pendingFees,
-      todayIncome,
-      todayExpenses,
-      monthlyIncome,
-      monthlyExpenses,
-      netProfit,
+      // Legacy fields
+      todayIncome:     periods.today.totalIncome,
+      todayExpenses:   periods.today.totalExpenses,
+      monthlyIncome:   periods.monthly.totalIncome,
+      monthlyExpenses: periods.monthly.totalExpenses,
+      netProfit:       periods.monthly.netProfit,
+      // Detailed period breakdowns
+      periods,
     });
   } catch (err) {
     req.log.error(err);

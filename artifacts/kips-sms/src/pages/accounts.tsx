@@ -17,7 +17,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, Printer, TrendingUp, TrendingDown, DollarSign, CreditCard } from "lucide-react";
+import { Plus, Loader2, Printer, TrendingUp, TrendingDown, DollarSign, CreditCard, Banknote } from "lucide-react";
 
 // ─── PRINT CSS ────────────────────────────────────────────────────────────────
 const PRINT_STYLES = `
@@ -422,51 +422,48 @@ export default function Accounts() {
           </div>
         </div>
 
-        {/* 4 Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Financial Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[
-            { label: "Fee Income",     value: feeIncomeTotal,     gradient: "from-blue-500 to-cyan-500",     icon: CreditCard,   hint: "From student fee payments"              },
-            { label: "Other Income",   value: manualIncomeTotal,  gradient: "from-emerald-500 to-green-500", icon: TrendingUp,   hint: "Manually entered income"                },
-            { label: "Total Expenses", value: totalExpensesValue, gradient: "from-red-500 to-rose-500",      icon: TrendingDown, hint: `Manual + Salary: PKR ${salaryPaidTotal.toLocaleString()}` },
+            { label: "Fee Income",       value: feeIncomeTotal,     gradient: "from-blue-600 to-cyan-500",     icon: CreditCard,   hint: "Student fee payments"                },
+            { label: "Other Income",     value: manualIncomeTotal,  gradient: "from-teal-500 to-emerald-500",  icon: TrendingUp,   hint: "Manually entered income"             },
+            { label: "Total Income",     value: totalIncomeValue,   gradient: "from-emerald-600 to-green-500", icon: DollarSign,   hint: "Fee + Other Income"                  },
+            { label: "Salary Expenses",  value: salaryPaidTotal,    gradient: "from-orange-500 to-amber-500",  icon: Banknote,     hint: "Staff salaries paid this month"      },
+            { label: "Other Expenses",   value: manualExpenses,     gradient: "from-red-400 to-rose-500",      icon: TrendingDown, hint: "Utilities, maintenance, etc."        },
             {
-              label: "Net Profit", value: netProfitValue,
-              gradient: netProfitValue >= 0 ? "from-purple-500 to-indigo-600" : "from-gray-600 to-gray-800",
-              icon: DollarSign, hint: "Fee + Other Income − Expenses",
+              label: "Net Profit",  value: netProfitValue,
+              gradient: netProfitValue >= 0 ? "from-violet-600 to-purple-600" : "from-gray-600 to-gray-800",
+              icon: DollarSign, hint: "Total Income − Total Expenses",
             },
           ].map(card => (
             <Card key={card.label} className={`bg-gradient-to-br ${card.gradient} border-0`}>
-              <CardContent className="p-5 text-white">
+              <CardContent className="p-4 text-white">
                 <div className="flex items-center justify-between mb-1">
-                  <p className="text-white/80 text-sm font-medium">{card.label}</p>
-                  <card.icon className="w-5 h-5 text-white/70" />
+                  <p className="text-white/80 text-xs font-semibold uppercase tracking-wide">{card.label}</p>
+                  <card.icon className="w-4 h-4 text-white/60" />
                 </div>
-                <p className="text-white/60 text-xs mb-2">{card.hint}</p>
+                <p className="text-white/55 text-xs mb-2">{card.hint}</p>
                 {isLoadingAny
                   ? <div className="h-7 bg-white/20 rounded animate-pulse" />
-                  : <p className="text-2xl font-bold">PKR {card.value.toLocaleString()}</p>
+                  : <p className="text-xl font-bold">PKR {card.value.toLocaleString()}</p>
                 }
               </CardContent>
             </Card>
           ))}
         </div>
 
-        {/* Total Income banner */}
-        <Card className="border border-emerald-200 bg-emerald-50">
-          <CardContent className="py-3 px-5">
-            <div className="flex flex-wrap items-center gap-4 text-sm">
-              <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
-                <TrendingUp className="w-4 h-4" /> Total Income this month:
-              </span>
-              {isLoadingAny
-                ? <span className="h-5 w-24 bg-emerald-200 rounded animate-pulse inline-block" />
-                : <span className="font-bold text-emerald-700 text-base">PKR {totalIncomeValue.toLocaleString()}</span>
-              }
-              <span className="text-emerald-600 text-xs">
-                (Fee Collections: PKR {feeIncomeTotal.toLocaleString()} + Other: PKR {manualIncomeTotal.toLocaleString()})
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Total Expenses strip */}
+        <div className="flex flex-wrap items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-5 py-3 text-sm">
+          <TrendingDown className="w-4 h-4 text-red-500 shrink-0" />
+          <span className="font-semibold text-red-800">Total Expenses — {monthLabel}:</span>
+          {isLoadingAny
+            ? <span className="h-5 w-24 bg-red-200 rounded animate-pulse inline-block" />
+            : <span className="font-bold text-red-700 text-base">PKR {totalExpensesValue.toLocaleString()}</span>
+          }
+          <span className="text-red-600 text-xs ml-auto">
+            Salaries: PKR {salaryPaidTotal.toLocaleString()} + Other: PKR {manualExpenses.toLocaleString()}
+          </span>
+        </div>
 
         <Tabs defaultValue="fees">
           <TabsList>
