@@ -53,7 +53,14 @@ export default function Fees() {
   const { user, token } = useAuthStore();
   const isStudent = user?.role === "student";
 
-  const { data: fees, isLoading } = useListFees(statusFilter ? { status: statusFilter as "paid" | "unpaid" | "partial" } : {});
+  // ✅ FIX: Student ke liye sirf current month ki fee show ho
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const { data: fees, isLoading } = useListFees(
+    isStudent
+      ? { month: currentMonth }
+      : statusFilter ? { status: statusFilter as "paid" | "unpaid" | "partial" } : {}
+  );
+
   const { data: students } = useListStudents({});
   const createMutation = useCreateFee();
   const payMutation = usePayFee();

@@ -1,13 +1,25 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Upload, Trash2, RefreshCw, Shield, Database, Clock, CheckCircle } from "lucide-react";
+import { Download, Upload, Trash2, RefreshCw, Shield, Database, Clock, CheckCircle, School, Save } from "lucide-react";
 
 interface SavedBackup {
   filename: string;
   size: number;
   createdAt: string;
+}
+
+interface SchoolInfo {
+  id?: number;
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  principalName: string;
+  tagline: string;
 }
 
 const API = "/api/admin";
@@ -20,9 +32,9 @@ function authHeader() {
 async function apiFetch(path: string, opts: RequestInit = {}) {
   const res = await fetch(`${API}${path}`, {
     ...opts,
-    headers: { ...authHeader(), "Content-Type": "application/json", ...(opts.headers ?? {}) },
+    headers: { ...(authHeader() as Record<string, string>), "Content-Type": "application/json", ...(opts.headers ?? {}) },
   });
-  if (!res.ok) throw new Error((await res.json()).error ?? "Request failed");
+  if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? "Request failed");
   return res;
 }
 
@@ -35,12 +47,56 @@ export default function Settings() {
   const [restoring, setRestoring] = useState(false);
   const [lastAutoBackup, setLastAutoBackup] = useState<string | null>(null);
 
+  // School Info state
+  const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({
+    name: "", address: "", phone: "", email: "", website: "", principalName: "", tagline: "",
+  });
+  const [loadingInfo, setLoadingInfo] = useState(true);
+  const [savingInfo, setSavingInfo] = useState(false);
+
+  useEffect(() => {
+    loadSchoolInfo();
+  }, []);
+
+  const loadSchoolInfo = async () => {
+    setLoadingInfo(true);
+    try {
+      const res = await apiFetch("/school-info");
+      const data = await res.json() as SchoolInfo;
+      setSchoolInfo({
+        name: data.name ?? "",
+        address: data.address ?? "",
+        phone: data.phone ?? "",
+        email: data.email ?? "",
+        website: data.website ?? "",
+        principalName: data.principalName ?? "",
+        tagline: data.tagline ?? "",
+      });
+    } catch {
+      toast({ variant: "destructive", title: "Could not load school info" });
+    } finally {
+      setLoadingInfo(false);
+    }
+  };
+
+  const saveSchoolInfo = async () => {
+    setSavingInfo(true);
+    try {
+      await apiFetch("/school-info", { method: "PUT", body: JSON.stringify(schoolInfo) });
+      toast({ title: "School info saved successfully" });
+    } catch {
+      toast({ variant: "destructive", title: "Failed to save school info" });
+    } finally {
+      setSavingInfo(false);
+    }
+  };
+
   const loadBackups = async () => {
     setLoadingBackups(true);
     try {
       const res = await apiFetch("/backups");
-      setBackups(await res.json());
-    } catch (e: unknown) {
+      setBackups(await res.json() as SavedBackup[]);
+    } catch {
       toast({ variant: "destructive", title: "Failed to load backups" });
     } finally {
       setLoadingBackups(false);
@@ -54,7 +110,7 @@ export default function Settings() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `kips-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `kips-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast({ title: "Backup downloaded successfully" });
@@ -67,7 +123,7 @@ export default function Settings() {
     setSaving(true);
     try {
       const res = await apiFetch("/backup/save", { method: "POST" });
-      const data = await res.json();
+      const data = await res.json() as { filename: string };
       toast({ title: "Backup saved to server", description: data.filename });
       setLastAutoBackup(new Date().toLocaleString("en-PK"));
       await loadBackups();
@@ -108,17 +164,15 @@ export default function Settings() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!confirm("This will REPLACE all current data with the backup. Are you sure?")) {
-      e.target.value = ""; return;
+      e.target.value = "";
+      return;
     }
     setRestoring(true);
     try {
       const text = await file.text();
       const backup = JSON.parse(text);
-      const res = await apiFetch("/restore", {
-        method: "POST",
-        body: JSON.stringify(backup),
-      });
-      const data = await res.json();
+      const res = await apiFetch("/restore", { method: "POST", body: JSON.stringify(backup) });
+      const data = await res.json() as { preBackup: string };
       toast({ title: "Restore complete", description: `Pre-restore backup: ${data.preBackup}` });
       await loadBackups();
     } catch (err: unknown) {
@@ -135,10 +189,98 @@ export default function Settings() {
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <Shield className="w-6 h-6 text-blue-600" /> Settings & Backup
         </h1>
-        <p className="text-gray-500 text-sm mt-1">Manage system backups and data restore</p>
+        <p className="text-gray-500 text-sm mt-1">Manage school information, backups, and data restore</p>
       </div>
 
-      {/* Manual Backup */}
+      {/* ── School Info ─────────────────────────────────────── */}
+      <Card className="border-blue-200">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <School className="w-4 h-4 text-blue-600" /> School Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingInfo ? (
+            <div className="text-sm text-gray-400 animate-pulse">Loading school info...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">School Name *</label>
+                  <Input
+                    value={schoolInfo.name}
+                    onChange={e => setSchoolInfo(p => ({ ...p, name: e.target.value }))}
+                    placeholder="KIPS School Hassari"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Principal Name</label>
+                  <Input
+                    value={schoolInfo.principalName}
+                    onChange={e => setSchoolInfo(p => ({ ...p, principalName: e.target.value }))}
+                    placeholder="e.g. Mr. Ahmed"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Phone</label>
+                  <Input
+                    value={schoolInfo.phone}
+                    onChange={e => setSchoolInfo(p => ({ ...p, phone: e.target.value }))}
+                    placeholder="+92 300 0000000"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Email</label>
+                  <Input
+                    value={schoolInfo.email}
+                    onChange={e => setSchoolInfo(p => ({ ...p, email: e.target.value }))}
+                    placeholder="info@kips.edu.pk"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Address</label>
+                  <Input
+                    value={schoolInfo.address}
+                    onChange={e => setSchoolInfo(p => ({ ...p, address: e.target.value }))}
+                    placeholder="Hassari, District..."
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Website</label>
+                  <Input
+                    value={schoolInfo.website}
+                    onChange={e => setSchoolInfo(p => ({ ...p, website: e.target.value }))}
+                    placeholder="www.kips.edu.pk"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Tagline / Motto</label>
+                  <Input
+                    value={schoolInfo.tagline}
+                    onChange={e => setSchoolInfo(p => ({ ...p, tagline: e.target.value }))}
+                    placeholder="e.g. Excellence in Education"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={saveSchoolInfo}
+                  disabled={savingInfo}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {savingInfo
+                    ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    : <Save className="w-4 h-4 mr-2" />
+                  }
+                  Save School Info
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Manual Backup ───────────────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base font-semibold flex items-center gap-2">
@@ -146,13 +288,23 @@ export default function Settings() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-gray-500">Download a full backup of all data (students, fees, attendance, exams, staff, accounts, certificates) as a JSON file.</p>
+          <p className="text-sm text-gray-500">
+            Download a full backup of all data (students, fees, attendance, exams, staff) as a JSON file.
+          </p>
           <div className="flex flex-wrap gap-3">
             <Button onClick={downloadBackup} className="bg-emerald-600 hover:bg-emerald-700 text-white">
               <Download className="w-4 h-4 mr-2" /> Download Backup File
             </Button>
-            <Button onClick={saveToServer} disabled={saving} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
-              {saving ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Database className="w-4 h-4 mr-2" />}
+            <Button
+              onClick={saveToServer}
+              disabled={saving}
+              variant="outline"
+              className="border-blue-300 text-blue-700 hover:bg-blue-50"
+            >
+              {saving
+                ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                : <Database className="w-4 h-4 mr-2" />
+              }
               Save Backup to Server
             </Button>
           </div>
@@ -164,7 +316,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* Restore */}
+      {/* ── Restore ─────────────────────────────────────────── */}
       <Card className="border-amber-200">
         <CardHeader>
           <CardTitle className="text-base font-semibold flex items-center gap-2">
@@ -173,7 +325,7 @@ export default function Settings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-            <strong>Warning:</strong> Restoring will replace all current student, fee, attendance, exam, and financial data with the backup. Staff records are preserved. A pre-restore backup is saved automatically.
+            <strong>Warning:</strong> Restoring will replace all current student, fee, attendance, and exam data with the backup. A pre-restore backup is saved automatically before any changes are made.
           </div>
           <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleRestore} />
           <Button
@@ -181,13 +333,16 @@ export default function Settings() {
             disabled={restoring}
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
-            {restoring ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+            {restoring
+              ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+              : <Upload className="w-4 h-4 mr-2" />
+            }
             {restoring ? "Restoring..." : "Choose Backup File & Restore"}
           </Button>
         </CardContent>
       </Card>
 
-      {/* Server Backups */}
+      {/* ── Saved Backups on Server ─────────────────────────── */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
@@ -209,7 +364,10 @@ export default function Settings() {
           ) : (
             <div className="space-y-2">
               {backups.map(b => (
-                <div key={b.filename} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div
+                  key={b.filename}
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100"
+                >
                   <div>
                     <p className="text-sm font-mono font-medium text-gray-800">{b.filename}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
@@ -220,7 +378,12 @@ export default function Settings() {
                     <Button size="sm" variant="outline" onClick={() => downloadSaved(b.filename)}>
                       <Download className="w-3.5 h-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50" onClick={() => deleteBackup(b.filename)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-500 hover:bg-red-50"
+                      onClick={() => deleteBackup(b.filename)}
+                    >
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>

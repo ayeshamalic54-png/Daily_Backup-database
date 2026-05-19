@@ -8,7 +8,7 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 
-const BACKUP_DIR = path.resolve("/home/runner/workspace/backups");
+const BACKUP_DIR = path.resolve(process.cwd(), "../../backups");
 const MAX_AUTO_BACKUPS = 7;
 
 export const autoBackupState = {

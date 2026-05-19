@@ -28,12 +28,15 @@ function StudentExamCard({ exam }: { exam: { id: number; name: string; subject: 
   const { data: results, isLoading } = useGetExamResults(exam.id);
   const result = results?.[0];
 
-  const passed = result && result.obtainedMarks != null
-    ? result.obtainedMarks >= (exam.passingMarks ?? 40)
+  // ✅ FIX: API returns `marksObtained` (original code had wrong field `obtainedMarks`)
+  const marks = result?.marksObtained ?? null;
+
+  const passed = marks != null
+    ? marks >= (exam.passingMarks ?? 40)
     : null;
 
-  const percentage = result?.obtainedMarks != null
-    ? Math.round((result.obtainedMarks / exam.totalMarks) * 100)
+  const percentage = marks != null
+    ? Math.round((marks / exam.totalMarks) * 100)
     : null;
 
   const getGrade = (pct: number) => {
@@ -66,12 +69,12 @@ function StudentExamCard({ exam }: { exam: { id: number; name: string; subject: 
         <div className="mt-4 border-t pt-3">
           {isLoading ? (
             <Skeleton className="h-10 w-full" />
-          ) : result?.obtainedMarks != null ? (
+          ) : marks != null ? (
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Your Score</p>
                 <p className="text-2xl font-bold text-gray-900 mt-0.5">
-                  {result.obtainedMarks} <span className="text-sm font-normal text-gray-400">/ {exam.totalMarks}</span>
+                  {marks} <span className="text-sm font-normal text-gray-400">/ {exam.totalMarks}</span>
                 </p>
                 {percentage != null && (
                   <p className="text-xs text-gray-500">{percentage}%</p>
@@ -148,7 +151,7 @@ export default function Exams() {
         {!isStudent && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white" data-testid="button-add-exam">
+              <Button className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white">
                 <Plus className="w-4 h-4 mr-2" /> Schedule Exam
               </Button>
             </DialogTrigger>
@@ -205,7 +208,7 @@ export default function Exams() {
             exams.map(exam => <StudentExamCard key={exam.id} exam={exam} />)
           ) : (
             exams.map(exam => (
-              <Card key={exam.id} className="hover:shadow-md transition-shadow" data-testid={`card-exam-${exam.id}`}>
+              <Card key={exam.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
