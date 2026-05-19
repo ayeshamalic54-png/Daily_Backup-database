@@ -17,6 +17,7 @@ export const studentsTable = pgTable("students", {
   section: varchar("section", { length: 10 }),
   rollNumber: varchar("roll_number", { length: 20 }),
   feeAmount: numeric("fee_amount", { precision: 10, scale: 2 }),
+  siblingDiscount: numeric("sibling_discount", { precision: 10, scale: 2 }).notNull().default("0"),
   status: varchar("status", { length: 20 }).notNull().default("active"),
   imageUrl: text("image_url"),
   username: varchar("username", { length: 100 }),

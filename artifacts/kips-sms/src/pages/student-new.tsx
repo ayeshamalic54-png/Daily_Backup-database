@@ -26,6 +26,7 @@ const schema = z.object({
   section:          z.string().optional(),
   rollNumber:       z.string().optional(),
   feeAmount:        z.string().optional(),
+  siblingDiscount:  z.string().optional(),
   status:           z.enum(["active", "inactive", "left"]).default("active"),
 });
 
@@ -66,8 +67,9 @@ export default function StudentNew() {
       {
         data: {
           ...values,
-          classId:   Number(values.classId),
-          feeAmount: values.feeAmount ? Number(values.feeAmount) : undefined,
+          classId:         Number(values.classId),
+          feeAmount:       values.feeAmount       ? Number(values.feeAmount)       : undefined,
+          siblingDiscount: values.siblingDiscount ? Number(values.siblingDiscount) : 0,
         },
       },
       {
@@ -266,6 +268,16 @@ export default function StudentNew() {
                 <FormItem>
                   <FormLabel>Monthly Fee (PKR)</FormLabel>
                   <FormControl><Input type="number" placeholder="2500" {...field} /></FormControl>
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="siblingDiscount" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center gap-1">
+                    Sibling Discount (PKR)
+                    <span className="text-xs text-blue-600 font-normal">(if applicable)</span>
+                  </FormLabel>
+                  <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
+                  <p className="text-xs text-gray-500">Monthly discount for students with siblings in school</p>
                 </FormItem>
               )} />
               <FormField control={form.control} name="status" render={({ field }) => (

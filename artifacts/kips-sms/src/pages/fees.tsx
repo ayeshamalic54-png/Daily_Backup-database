@@ -115,77 +115,162 @@ interface Receipt {
 }
 
 function buildReceiptHtml(receipt: Receipt, logoSrc: string): string {
-  const copyHtml = (copyLabel: string) => `
-    <div class="receipt">
-      <div class="copy-label">${copyLabel}</div>
+  const paidFull = receipt.remaining <= 0;
+  const copyHtml = (copyLabel: string, accent: string) => `
+    <div class="receipt" style="--accent:${accent}">
+      <div class="ribbon" style="background:${accent}">${copyLabel}</div>
+      <div class="watermark">PAID</div>
       <div class="header">
         <img src="${logoSrc}" alt="KIPS" />
-        <div>
+        <div class="header-text">
           <div class="school-name">KIPS School Hassari</div>
-          <div class="subtitle">Fee Receipt</div>
+          <div class="tagline">Bright Future — Quality Education</div>
+          <div class="receipt-title">FEE PAYMENT RECEIPT</div>
         </div>
       </div>
-      <div class="row-meta"><span class="label">Receipt No.</span><span class="mono">${receipt.receiptNo}</span></div>
-      <div class="row-meta"><span class="label">Date</span><span>${receipt.paidDate}</span></div>
-      <div class="divider"></div>
-      <div class="row"><span class="label">Student</span><span class="val">${receipt.studentName}</span></div>
-      <div class="row"><span class="label">Adm. No.</span><span class="adm">${receipt.admissionNumber}</span></div>
-      <div class="row"><span class="label">Class</span><span class="val">${receipt.className}</span></div>
-      <div class="row"><span class="label">Month</span><span class="val">${receipt.month}</span></div>
-      <div class="divider"></div>
-      <div class="row amount-row">
-        <span class="label green">Amount Paid</span>
-        <span class="green bold">PKR ${receipt.amountPaid.toLocaleString()}</span>
+
+      <div class="meta-grid">
+        <div class="meta-cell"><span class="meta-label">Receipt No.</span><span class="meta-val mono">${receipt.receiptNo}</span></div>
+        <div class="meta-cell"><span class="meta-label">Date</span><span class="meta-val">${receipt.paidDate}</span></div>
       </div>
-      ${receipt.remaining > 0
-        ? `<div class="row"><span class="label red">Remaining Balance</span><span class="red bold">PKR ${receipt.remaining.toLocaleString()}</span></div>`
-        : `<div class="row"><span class="label green">Status</span><span class="green bold">✓ FULLY PAID</span></div>`}
-      <div class="divider"></div>
-      <div class="approved-row"><span class="approved-text">✦ Approved by Admin ✦</span></div>
+
+      <div class="info-card">
+        <div class="info-row"><span class="ik">Student Name</span><span class="iv strong">${receipt.studentName}</span></div>
+        <div class="info-row"><span class="ik">Admission No.</span><span class="iv mono adm">${receipt.admissionNumber}</span></div>
+        <div class="info-row"><span class="ik">Class</span><span class="iv">${receipt.className}</span></div>
+        <div class="info-row"><span class="ik">Month</span><span class="iv strong">${receipt.month}</span></div>
+      </div>
+
+      <div class="amount-card ${paidFull ? "paid-full" : "paid-partial"}">
+        <div class="amount-label">AMOUNT PAID</div>
+        <div class="amount-value">PKR ${receipt.amountPaid.toLocaleString()}</div>
+        ${paidFull
+          ? `<div class="status-pill paid">✓ FULLY PAID</div>`
+          : `<div class="balance-line">Remaining Balance: <strong>PKR ${receipt.remaining.toLocaleString()}</strong></div>`}
+      </div>
+
+      <div class="signature-row">
+        <div class="sig-cell">
+          <div class="sig-line"></div>
+          <div class="sig-label">Cashier Signature</div>
+        </div>
+        <div class="seal">
+          <div class="seal-text">OFFICIAL<br/>STAMP</div>
+        </div>
+        <div class="sig-cell">
+          <div class="sig-line"></div>
+          <div class="sig-label">Authorized Signature</div>
+        </div>
+      </div>
+
       <div class="footer">
-        <span>Cashier: ________________</span>
-        <span class="muted">Thank you for your payment</span>
+        <span class="footer-text">Thank you for your payment</span>
+        <span class="footer-contact">📞 Contact school office for queries</span>
       </div>
     </div>`;
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Fee Receipt</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Fee Receipt — ${receipt.studentName}</title>
 <style>
+  @page { size: A4 portrait; margin: 10mm 8mm; }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Segoe UI',Arial,sans-serif;background:#f3f4f6;padding:20px;
-    -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
-  .page{max-width:420px;margin:0 auto}
-  .receipt{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:16px;position:relative}
-  .copy-label{position:absolute;top:12px;right:14px;background:#1a2a5e;color:#fff;font-size:9px;font-weight:700;
-    letter-spacing:1px;text-transform:uppercase;padding:3px 8px;border-radius:20px;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .header{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:2px solid #1a2a5e;margin-bottom:12px}
-  .header img{width:52px;height:52px;border-radius:50%;border:2px solid #e07b1a;object-fit:cover}
-  .school-name{font-size:16px;font-weight:700;color:#1a2a5e}
-  .subtitle{font-size:11px;color:#9ca3af;margin-top:2px}
-  .row-meta{display:flex;justify-content:space-between;font-size:11px;color:#6b7280;margin-bottom:5px}
-  .mono{font-family:monospace;font-weight:700;color:#1f2937;font-size:12px}
-  .divider{border-top:1px solid #e5e7eb;margin:10px 0}
-  .row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}
-  .label{color:#6b7280}.val{color:#111827;font-weight:500}.adm{font-family:monospace;color:#7c3aed;font-weight:600}
-  .green{color:#059669!important}.red{color:#dc2626!important}.bold{font-weight:700}
-  .amount-row{font-size:14px}
-  .approved-row{text-align:center;margin:6px 0 4px}
-  .approved-text{display:inline-block;font-size:10px;font-weight:700;letter-spacing:1px;color:#1a2a5e;
-    background:#eef2ff;border:1px solid #c7d2fe;border-radius:20px;padding:3px 14px;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .footer{display:flex;justify-content:space-between;font-size:10px;color:#9ca3af;margin-top:4px}
-  .muted{color:#d1d5db}
-  .cut-line{text-align:center;font-size:10px;color:#d1d5db;border-top:1px dashed #d1d5db;
-    padding-top:6px;margin-bottom:6px;letter-spacing:2px}
-  @media print{body{background:#fff;padding:0}
-    .receipt{border-radius:0;border:none;border-bottom:1px solid #e5e7eb;margin-bottom:8px}}
+  body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;background:#f1f5f9;padding:14px;
+    -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color:#0f172a}
+  .page{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  .receipt{
+    background:#fff;border-radius:14px;padding:18px 20px;position:relative;overflow:hidden;
+    border:2px solid var(--accent);
+    box-shadow:0 4px 18px rgba(15,23,42,0.08);
+  }
+  .receipt::before{
+    content:"";position:absolute;top:0;left:0;right:0;height:6px;
+    background:linear-gradient(90deg,var(--accent),#e07b1a);
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .ribbon{
+    position:absolute;top:14px;right:-32px;color:#fff;font-size:10px;font-weight:800;letter-spacing:2px;
+    padding:3px 36px;transform:rotate(35deg);text-transform:uppercase;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+    box-shadow:0 1px 4px rgba(0,0,0,0.15);
+  }
+  .watermark{
+    position:absolute;left:50%;top:55%;transform:translate(-50%,-50%) rotate(-22deg);
+    font-size:90px;font-weight:900;color:rgba(16,185,129,0.06);letter-spacing:6px;
+    pointer-events:none;z-index:0;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .header{display:flex;align-items:center;gap:14px;padding:8px 0 12px;border-bottom:2px dashed #cbd5e1;margin-bottom:12px;position:relative;z-index:1}
+  .header img{width:60px;height:60px;border-radius:50%;border:3px solid #e07b1a;object-fit:cover;
+    box-shadow:0 2px 6px rgba(224,123,26,0.25);
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .header-text{flex:1}
+  .school-name{font-size:18px;font-weight:800;color:var(--accent);letter-spacing:0.3px}
+  .tagline{font-size:10px;color:#64748b;margin-top:1px;font-style:italic}
+  .receipt-title{display:inline-block;margin-top:4px;font-size:9px;font-weight:700;letter-spacing:2px;
+    background:linear-gradient(135deg,var(--accent),#3730a3);color:#fff;padding:3px 12px;border-radius:12px;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+
+  .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;position:relative;z-index:1}
+  .meta-cell{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;display:flex;justify-content:space-between;align-items:center}
+  .meta-label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  .meta-val{font-size:12px;color:#0f172a;font-weight:700}
+  .mono{font-family:'Courier New',monospace}
+
+  .info-card{
+    background:linear-gradient(135deg,#f8fafc,#eef2ff);
+    border:1px solid #e0e7ff;border-radius:10px;padding:10px 14px;margin-bottom:12px;position:relative;z-index:1;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .info-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dotted #cbd5e1;font-size:12px}
+  .info-row:last-child{border-bottom:none}
+  .ik{color:#64748b;font-weight:500}
+  .iv{color:#0f172a}
+  .iv.strong{font-weight:700}
+  .adm{color:#7c3aed;font-weight:700}
+
+  .amount-card{
+    border-radius:10px;padding:14px;margin-bottom:14px;text-align:center;position:relative;z-index:1;
+    color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;
+    box-shadow:0 3px 10px rgba(0,0,0,0.1);
+  }
+  .paid-full{background:linear-gradient(135deg,#059669,#10b981);}
+  .paid-partial{background:linear-gradient(135deg,#0891b2,#0ea5e9);}
+  .amount-label{font-size:10px;font-weight:700;letter-spacing:3px;opacity:0.9}
+  .amount-value{font-size:26px;font-weight:900;margin-top:4px;letter-spacing:0.5px}
+  .status-pill{display:inline-block;margin-top:6px;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);
+    padding:3px 14px;border-radius:14px;font-size:10px;font-weight:700;letter-spacing:1px}
+  .balance-line{margin-top:4px;font-size:11px;opacity:0.95}
+
+  .signature-row{display:grid;grid-template-columns:1fr 80px 1fr;gap:14px;align-items:end;margin-bottom:10px;position:relative;z-index:1}
+  .sig-cell{text-align:center}
+  .sig-line{border-top:1.5px solid #475569;height:1px;margin-bottom:3px}
+  .sig-label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  .seal{
+    width:80px;height:60px;border:2px dashed var(--accent);border-radius:50%;
+    display:flex;align-items:center;justify-content:center;color:var(--accent);
+    font-size:8px;font-weight:800;text-align:center;line-height:1.2;letter-spacing:1px;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+
+  .footer{display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;
+    padding-top:8px;border-top:1px dashed #cbd5e1;position:relative;z-index:1}
+  .footer-text{font-style:italic;color:var(--accent);font-weight:600}
+
+  .cut-line{text-align:center;font-size:10px;color:#94a3b8;letter-spacing:4px;padding:2px 0;font-weight:500}
+
+  @media print {
+    body { background:#fff; padding:0; }
+    .receipt { box-shadow:none; page-break-inside:avoid; }
+    .cut-line { color:#cbd5e1; }
+  }
 </style></head>
 <body><div class="page">
-  ${copyHtml("School Copy")}
-  <div class="cut-line">✂ &nbsp; CUT HERE &nbsp; ✂</div>
-  ${copyHtml("Student Copy")}
+  ${copyHtml("School Copy", "#1a2a5e")}
+  <div class="cut-line">✂ &nbsp;━━━━━━━━━━━━━━━ CUT HERE ━━━━━━━━━━━━━━━ &nbsp;✂</div>
+  ${copyHtml("Parent Copy", "#7c3aed")}
 </div>
-<script>window.onload=function(){window.print()}<\/script>
+<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
 </body></html>`;
 }
 
