@@ -48,7 +48,7 @@ const getNavigation = (role?: string) => {
   return allRoutes.filter(route => !role || route.roles.includes(role));
 };
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const [location] = useLocation();
   const { user, logout } = useAuthStore();
   const navigation = getNavigation(user?.role);
@@ -79,6 +79,7 @@ export function Sidebar() {
             return (
               <Link key={item.name} href={item.href}>
                 <div
+                  onClick={() => onNavigate?.()}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150 group relative",
                     isActive ? "font-semibold" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
