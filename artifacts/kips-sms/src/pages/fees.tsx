@@ -589,16 +589,22 @@ export default function Fees() {
   const isAdmin     = user?.role === "admin";
   const isStudent   = user?.role === "student";
 
-  const feeQuery: Record<string, string> = {};
-  if (statusFilter) feeQuery.status = statusFilter;
-  const { data: fees, isLoading } = useListFees(feeQuery as { status?: "paid" | "unpaid" | "partial" });
+  // Fetch ALL fees — apply filters client-side so the list stays in sync
+  // after payments without waiting for a separately-cached filtered query.
+  const { data: fees, isLoading } = useListFees({});
   const { data: students } = useListStudents({});
   const { data: classes }  = useListClasses({});
 
   const selectedClassName = classFilter ? classes?.find(c => String(c.id) === classFilter)?.name : undefined;
-  const displayFees = selectedClassName
-    ? (fees ?? []).filter(f => f.className === selectedClassName)
-    : fees;
+  const displayFees = (fees ?? [])
+    .filter(f => !selectedClassName || f.className === selectedClassName)
+    .filter(f => {
+      if (!statusFilter) return true;
+      if (statusFilter === "paid")   return f.status === "paid";
+      if (statusFilter === "unpaid") return f.status === "unpaid" || f.status === "partial";
+      if (statusFilter === "partial") return f.status === "partial";
+      return true;
+    });
   const createMutation     = useCreateFee();
   const payMutation        = usePayFee();
   const currentFee         = fees?.find(f => f.id === payOpen);
@@ -713,7 +719,7 @@ export default function Fees() {
     const disc = Math.max(0, Number(payDiscount ?? 0));
     payMutation.mutate({ id: payOpen, data: { paidAmount: paid, discount: disc } as never }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListFeesQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getListFeesQueryKey(), refetchType: "all" });
         const fine = Number((currentFee as unknown as Record<string, unknown>).fine ?? 0);
         const effectiveTotal = currentFee.amount + fine - disc;
         const totalPaid = (currentFee.paidAmount ?? 0) + paid;
