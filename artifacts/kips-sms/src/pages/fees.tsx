@@ -113,163 +113,125 @@ interface Receipt {
   paidDate:        string;
 }
 
+function escapeHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+
 function buildReceiptHtml(receipt: Receipt, logoSrc: string): string {
   const paidFull = receipt.remaining <= 0;
-  const copyHtml = (copyLabel: string, accent: string) => `
-    <div class="receipt" style="--accent:${accent}">
-      <div class="ribbon" style="background:${accent}">${copyLabel}</div>
-      <div class="watermark">PAID</div>
+  const e = escapeHtml;
+  const copyHtml = (copyLabel: string) => `
+    <div class="receipt">
+      <div class="copy-tag">${e(copyLabel)}</div>
+
       <div class="header">
-        <img src="${logoSrc}" alt="KIPS" />
+        <img src="${e(logoSrc)}" alt="KIPS" class="logo" />
         <div class="header-text">
           <div class="school-name">KIPS School Hassari</div>
           <div class="tagline">Bright Future — Quality Education</div>
-          <div class="receipt-title">FEE PAYMENT RECEIPT</div>
         </div>
       </div>
 
-      <div class="meta-grid">
-        <div class="meta-cell"><span class="meta-label">Receipt No.</span><span class="meta-val mono">${receipt.receiptNo}</span></div>
-        <div class="meta-cell"><span class="meta-label">Date</span><span class="meta-val">${receipt.paidDate}</span></div>
+      <div class="title-bar">FEE PAYMENT RECEIPT</div>
+
+      <div class="meta">
+        <span><b>Receipt #:</b> ${e(receipt.receiptNo)}</span>
+        <span><b>Date:</b> ${e(receipt.paidDate)}</span>
       </div>
 
-      <div class="info-card">
-        <div class="info-row"><span class="ik">Student Name</span><span class="iv strong">${receipt.studentName}</span></div>
-        <div class="info-row"><span class="ik">Admission No.</span><span class="iv mono adm">${receipt.admissionNumber}</span></div>
-        <div class="info-row"><span class="ik">Class</span><span class="iv">${receipt.className}</span></div>
-        <div class="info-row"><span class="ik">Month</span><span class="iv strong">${receipt.month}</span></div>
-      </div>
+      <table class="info">
+        <tr><td class="lbl">Student Name</td><td class="val"><b>${e(receipt.studentName)}</b></td></tr>
+        <tr><td class="lbl">Admission No.</td><td class="val">${e(receipt.admissionNumber)}</td></tr>
+        <tr><td class="lbl">Class</td><td class="val">${e(receipt.className)}</td></tr>
+        <tr><td class="lbl">Month</td><td class="val"><b>${e(receipt.month)}</b></td></tr>
+      </table>
 
-      <div class="amount-card ${paidFull ? "paid-full" : "paid-partial"}">
-        <div class="amount-label">AMOUNT PAID</div>
-        <div class="amount-value">PKR ${receipt.amountPaid.toLocaleString()}</div>
+      <div class="amount-box ${paidFull ? "paid" : "partial"}">
+        <div class="amt-label">AMOUNT PAID</div>
+        <div class="amt-value">PKR ${receipt.amountPaid.toLocaleString()}</div>
         ${paidFull
-          ? `<div class="status-pill paid">✓ FULLY PAID</div>`
-          : `<div class="balance-line">Remaining Balance: <strong>PKR ${receipt.remaining.toLocaleString()}</strong></div>`}
+          ? `<div class="status">✓ FULLY PAID</div>`
+          : `<div class="status">Remaining: PKR ${receipt.remaining.toLocaleString()}</div>`}
       </div>
 
-      <div class="signature-row">
-        <div class="sig-cell">
+      <div class="signatures">
+        <div class="sig">
           <div class="sig-line"></div>
-          <div class="sig-label">Cashier Signature</div>
+          <div class="sig-label">Cashier</div>
         </div>
-        <div class="seal">
-          <div class="seal-text">OFFICIAL<br/>STAMP</div>
-        </div>
-        <div class="sig-cell">
+        <div class="sig">
           <div class="sig-line"></div>
           <div class="sig-label">Authorized Signature</div>
         </div>
       </div>
 
-      <div class="footer">
-        <span class="footer-text">Thank you for your payment</span>
-        <span class="footer-contact">📞 Contact school office for queries</span>
-      </div>
+      <div class="footer">Thank you for your payment • Keep this receipt for your records</div>
     </div>`;
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Fee Receipt — ${receipt.studentName}</title>
 <style>
-  @page { size: A4 portrait; margin: 10mm 8mm; }
+  @page { size: A4 portrait; margin: 12mm; }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;background:#f1f5f9;padding:14px;
-    -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color:#0f172a}
-  .page{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#111;background:#fff;
+    -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+  .page{max-width:180mm;margin:0 auto;}
   .receipt{
-    background:#fff;border-radius:14px;padding:18px 20px;position:relative;overflow:hidden;
-    border:2px solid var(--accent);
-    box-shadow:0 4px 18px rgba(15,23,42,0.08);
+    border:1.5px solid #1a2a5e;border-radius:6px;padding:14px 18px;margin-bottom:10px;
+    position:relative;page-break-inside:avoid;
   }
-  .receipt::before{
-    content:"";position:absolute;top:0;left:0;right:0;height:6px;
-    background:linear-gradient(90deg,var(--accent),#e07b1a);
+  .copy-tag{
+    position:absolute;top:-1px;right:14px;background:#1a2a5e;color:#fff;
+    font-size:10px;font-weight:700;letter-spacing:1.5px;padding:3px 14px;
+    border-radius:0 0 4px 4px;
     -webkit-print-color-adjust:exact;print-color-adjust:exact;
   }
-  .ribbon{
-    position:absolute;top:14px;right:-32px;color:#fff;font-size:10px;font-weight:800;letter-spacing:2px;
-    padding:3px 36px;transform:rotate(35deg);text-transform:uppercase;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact;
-    box-shadow:0 1px 4px rgba(0,0,0,0.15);
-  }
-  .watermark{
-    position:absolute;left:50%;top:55%;transform:translate(-50%,-50%) rotate(-22deg);
-    font-size:90px;font-weight:900;color:rgba(16,185,129,0.06);letter-spacing:6px;
-    pointer-events:none;z-index:0;
+  .header{display:flex;align-items:center;gap:12px;padding:6px 0 10px;border-bottom:1px solid #ddd}
+  .logo{width:54px;height:54px;border-radius:50%;object-fit:cover;border:1.5px solid #1a2a5e}
+  .school-name{font-size:18px;font-weight:800;color:#1a2a5e;letter-spacing:0.3px}
+  .tagline{font-size:10px;color:#666;margin-top:1px}
+  .title-bar{
+    text-align:center;background:#1a2a5e;color:#fff;font-size:11px;font-weight:700;
+    letter-spacing:3px;padding:5px;margin:10px 0;border-radius:3px;
     -webkit-print-color-adjust:exact;print-color-adjust:exact;
   }
-  .header{display:flex;align-items:center;gap:14px;padding:8px 0 12px;border-bottom:2px dashed #cbd5e1;margin-bottom:12px;position:relative;z-index:1}
-  .header img{width:60px;height:60px;border-radius:50%;border:3px solid #e07b1a;object-fit:cover;
-    box-shadow:0 2px 6px rgba(224,123,26,0.25);
+  .meta{display:flex;justify-content:space-between;font-size:11px;margin-bottom:8px;color:#333}
+  .info{width:100%;font-size:12px;border-collapse:collapse;margin-bottom:10px}
+  .info td{padding:5px 8px;border-bottom:1px dotted #ccc}
+  .info .lbl{color:#666;width:35%}
+  .info .val{color:#111}
+  .amount-box{
+    text-align:center;padding:12px;margin-bottom:10px;border-radius:4px;color:#fff;
     -webkit-print-color-adjust:exact;print-color-adjust:exact;
   }
-  .header-text{flex:1}
-  .school-name{font-size:18px;font-weight:800;color:var(--accent);letter-spacing:0.3px}
-  .tagline{font-size:10px;color:#64748b;margin-top:1px;font-style:italic}
-  .receipt-title{display:inline-block;margin-top:4px;font-size:9px;font-weight:700;letter-spacing:2px;
-    background:linear-gradient(135deg,var(--accent),#3730a3);color:#fff;padding:3px 12px;border-radius:12px;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact;
-  }
-
-  .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;position:relative;z-index:1}
-  .meta-cell{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;display:flex;justify-content:space-between;align-items:center}
-  .meta-label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;font-weight:600}
-  .meta-val{font-size:12px;color:#0f172a;font-weight:700}
-  .mono{font-family:'Courier New',monospace}
-
-  .info-card{
-    background:linear-gradient(135deg,#f8fafc,#eef2ff);
-    border:1px solid #e0e7ff;border-radius:10px;padding:10px 14px;margin-bottom:12px;position:relative;z-index:1;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact;
-  }
-  .info-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dotted #cbd5e1;font-size:12px}
-  .info-row:last-child{border-bottom:none}
-  .ik{color:#64748b;font-weight:500}
-  .iv{color:#0f172a}
-  .iv.strong{font-weight:700}
-  .adm{color:#7c3aed;font-weight:700}
-
-  .amount-card{
-    border-radius:10px;padding:14px;margin-bottom:14px;text-align:center;position:relative;z-index:1;
-    color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;
-    box-shadow:0 3px 10px rgba(0,0,0,0.1);
-  }
-  .paid-full{background:linear-gradient(135deg,#059669,#10b981);}
-  .paid-partial{background:linear-gradient(135deg,#0891b2,#0ea5e9);}
-  .amount-label{font-size:10px;font-weight:700;letter-spacing:3px;opacity:0.9}
-  .amount-value{font-size:26px;font-weight:900;margin-top:4px;letter-spacing:0.5px}
-  .status-pill{display:inline-block;margin-top:6px;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);
-    padding:3px 14px;border-radius:14px;font-size:10px;font-weight:700;letter-spacing:1px}
-  .balance-line{margin-top:4px;font-size:11px;opacity:0.95}
-
-  .signature-row{display:grid;grid-template-columns:1fr 80px 1fr;gap:14px;align-items:end;margin-bottom:10px;position:relative;z-index:1}
-  .sig-cell{text-align:center}
-  .sig-line{border-top:1.5px solid #475569;height:1px;margin-bottom:3px}
-  .sig-label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:1px;font-weight:600}
-  .seal{
-    width:80px;height:60px;border:2px dashed var(--accent);border-radius:50%;
-    display:flex;align-items:center;justify-content:center;color:var(--accent);
-    font-size:8px;font-weight:800;text-align:center;line-height:1.2;letter-spacing:1px;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact;
-  }
-
-  .footer{display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;
-    padding-top:8px;border-top:1px dashed #cbd5e1;position:relative;z-index:1}
-  .footer-text{font-style:italic;color:var(--accent);font-weight:600}
-
-  .cut-line{text-align:center;font-size:10px;color:#94a3b8;letter-spacing:4px;padding:2px 0;font-weight:500}
-
+  .amount-box.paid{background:#059669}
+  .amount-box.partial{background:#0891b2}
+  .amt-label{font-size:10px;letter-spacing:2px;opacity:0.9}
+  .amt-value{font-size:24px;font-weight:800;margin:3px 0}
+  .status{font-size:11px;font-weight:600;margin-top:4px}
+  .signatures{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin:14px 0 8px}
+  .sig{text-align:center}
+  .sig-line{border-top:1px solid #333;margin-bottom:3px;height:1px}
+  .sig-label{font-size:10px;color:#666;letter-spacing:0.5px}
+  .footer{text-align:center;font-size:9px;color:#888;padding-top:6px;border-top:1px dashed #ddd;font-style:italic}
+  .cut-line{text-align:center;font-size:9px;color:#999;letter-spacing:3px;padding:4px 0;margin:2px 0;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc}
   @media print {
-    body { background:#fff; padding:0; }
-    .receipt { box-shadow:none; page-break-inside:avoid; }
-    .cut-line { color:#cbd5e1; }
+    body{padding:0}
+    .no-print{display:none}
+    .receipt{border-color:#000}
   }
+  .no-print{position:fixed;top:10px;right:10px;background:#1a2a5e;color:#fff;padding:8px 14px;
+    border-radius:4px;font-size:12px;cursor:pointer;border:none;font-weight:600;
+    box-shadow:0 2px 6px rgba(0,0,0,0.2);}
 </style></head>
-<body><div class="page">
-  ${copyHtml("School Copy", "#1a2a5e")}
-  <div class="cut-line">✂ &nbsp;━━━━━━━━━━━━━━━ CUT HERE ━━━━━━━━━━━━━━━ &nbsp;✂</div>
-  ${copyHtml("Parent Copy", "#7c3aed")}
+<body>
+<button class="no-print" onclick="window.print()">🖨️ Print / Save as PDF</button>
+<div class="page">
+  ${copyHtml("SCHOOL COPY")}
+  <div class="cut-line">✂  CUT HERE  ✂</div>
+  ${copyHtml("PARENT COPY")}
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
+<script>window.onload=function(){setTimeout(function(){window.print()},400)}<\/script>
 </body></html>`;
 }
 
@@ -1045,7 +1007,7 @@ export default function Fees() {
                   <table className="w-full text-sm print:text-xs">
                     <thead className="bg-gray-50">
                       <tr>
-                        {["Student","Adm#","Class","Month","Amount","Fine","Discount","Paid","Remaining","Due Date","Status","Actions"].map(h => (
+                        {["#","Student","Adm#","Class","Month","Amount","Fine","Discount","Paid","Remaining","Due Date","Status","Actions"].map(h => (
                           <th key={h} className={`text-left py-3 px-3 font-semibold text-gray-600 ${h === "Actions" ? "print:hidden" : ""}`}>{h}</th>
                         ))}
                       </tr>
@@ -1053,12 +1015,13 @@ export default function Fees() {
                     <tbody>
                       {!displayFees?.length ? (
                         <tr>
-                          <td colSpan={12} className="py-12 text-center text-gray-400">Koi fee record nahi mila</td>
+                          <td colSpan={13} className="py-12 text-center text-gray-400">No fee records found</td>
                         </tr>
-                      ) : displayFees.map(fee => {
+                      ) : displayFees.map((fee, idx) => {
                         const st = statusConfig[fee.status as keyof typeof statusConfig] || statusConfig.unpaid;
                         return (
                           <tr key={fee.id} className="border-b hover:bg-gray-50">
+                            <td className="py-2.5 px-3 text-gray-500 font-medium w-10">{idx + 1}</td>
                             <td className="py-2.5 px-3 font-medium text-gray-900">{fee.studentName || "—"}</td>
                             <td className="py-2.5 px-3 text-xs font-mono text-purple-600">{(fee as unknown as Record<string, unknown>).admissionNumber as string || "—"}</td>
                             <td className="py-2.5 px-3 text-gray-600">{fee.className || "—"}</td>
