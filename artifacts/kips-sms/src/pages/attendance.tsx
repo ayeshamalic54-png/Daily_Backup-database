@@ -4,7 +4,7 @@
                   useListAttendance, useMarkAttendance, useListStudents, useListStaff, useListClasses,
                   getListAttendanceQueryKey,
                 } from "@workspace/api-client-react";
-                import { useQueryClient, useMutation } from "@tanstack/react-query";
+                import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
                 import { Button } from "@/components/ui/button";
                 import { Input } from "@/components/ui/input";
                 import { Card, CardContent } from "@/components/ui/card";
@@ -246,6 +246,7 @@
 
                 function BulkAttendance() {
                   const { toast }   = useToast();
+                  const queryClient = useQueryClient();
                   const [bulkType,  setBulkType]  = useState<"student" | "staff">("student");
                   const [bulkDate,  setBulkDate]  = useState(new Date().toISOString().split("T")[0]);
                   const [classId,   setClassId]   = useState<string>("");
@@ -298,6 +299,8 @@
                       if (!res.ok) throw new Error("Failed");
                       const data = await res.json() as { saved: number };
                       toast({ title: `✓ ${data.saved} attendance records saved for ${bulkDate}` });
+                      // Refresh the Daily tab and any dependent views so the new records show immediately.
+                      queryClient.invalidateQueries({ queryKey: getListAttendanceQueryKey(), refetchType: "all" });
                       setLoaded(false);
                       setRows([]);
                     } catch {
@@ -476,10 +479,14 @@
 
                 // ─── Main Attendance Component ────────────────────────────────────────────────
                 export default function Attendance() {
+                  const today = new Date().toISOString().split("T")[0];
                   const [tab,           setTab]         = useState<"bulk" | "daily" | "deductions">("bulk");
                   const [open,          setOpen]         = useState(false);
-                  const [dateFilter,    setDateFilter]   = useState(new Date().toISOString().split("T")[0]);
+                  const [dateFrom,      setDateFrom]    = useState(today);
+                  const [dateTo,        setDateTo]      = useState(today);
                   const [typeFilter,    setTypeFilter]   = useState<"student" | "staff">("student");
+                  // Backward-compatible single-day date used by the "Mark Attendance" dialog default.
+                  const dateFilter = dateFrom;
                   const { toast }       = useToast();
                   const queryClient     = useQueryClient();
 
@@ -494,7 +501,24 @@
                     return () => { document.getElementById("kips-print-styles")?.remove(); };
                   }, []);
 
-                  const { data: attendance, isLoading } = useListAttendance({ date: dateFilter, type: typeFilter });
+                  // Fetch attendance over a date range. Falls back to single-day when
+                  // dateFrom === dateTo. Query key mirrors the one used by the generated
+                  // hook so cache invalidations from BulkAttendance also hit this query.
+                  const { data: attendance, isLoading } = useQuery<Array<{
+                    id: number; date: string; type: string; status: string;
+                    studentId: number | null; staffId: number | null;
+                    personName: string | null; className: string | null;
+                  }>>({
+                    queryKey: [...getListAttendanceQueryKey(), { dateFrom, dateTo, type: typeFilter }],
+                    queryFn: async () => {
+                      const params = new URLSearchParams({ dateFrom, dateTo, type: typeFilter });
+                      const res = await fetch(`/api/attendance?${params.toString()}`, {
+                        headers: authHeader() as HeadersInit,
+                      });
+                      if (!res.ok) throw new Error("Failed");
+                      return res.json();
+                    },
+                  });
                   const { data: students }   = useListStudents({});
                   const { data: staff }      = useListStaff();
                   const markMutation         = useMarkAttendance();
@@ -798,14 +822,35 @@
                               ))}
                             </div>
 
-                            <div className="flex flex-col sm:flex-row gap-3">
-                              <Input
-                                type="date"
-                                value={dateFilter}
-                                onChange={e => setDateFilter(e.target.value)}
-                                className="w-auto"
-                              />
-                              <div className="flex gap-2">
+                            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs font-medium text-gray-600">From:</label>
+                                <Input
+                                  type="date"
+                                  value={dateFrom}
+                                  onChange={e => {
+                                    const v = e.target.value;
+                                    setDateFrom(v);
+                                    // Auto-snap dateTo forward if it ends up before dateFrom
+                                    if (v && dateTo && v > dateTo) setDateTo(v);
+                                  }}
+                                  className="w-auto h-9"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs font-medium text-gray-600">To:</label>
+                                <Input
+                                  type="date"
+                                  value={dateTo}
+                                  min={dateFrom}
+                                  onChange={e => setDateTo(e.target.value)}
+                                  className="w-auto h-9"
+                                />
+                              </div>
+                              <Button size="sm" variant="ghost" onClick={() => { setDateFrom(today); setDateTo(today); }}>
+                                Today
+                              </Button>
+                              <div className="flex gap-2 sm:ml-auto">
                                 {(["student", "staff"] as const).map(t => (
                                   <Button
                                     key={t} size="sm"

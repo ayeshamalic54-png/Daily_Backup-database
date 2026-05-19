@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { attendanceTable, studentsTable, staffTable, classesTable, salariesTable } from "@workspace/db";
-import { eq, and, like, sql } from "drizzle-orm";
+import { eq, and, like, sql, gte, lte } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import type { Request } from "express";
 
@@ -131,7 +131,7 @@ router.get("/monthly-deductions", requireAuth, async (req, res) => {
 router.get("/", requireAuth, async (req, res) => {
   try {
     const reqUser = (req as AuthReq).user;
-    const { date, classId, type } = req.query;
+    const { date, dateFrom, dateTo, classId, type } = req.query;
     const conditions = [];
 
     if (reqUser.role === "student") {
@@ -143,8 +143,16 @@ router.get("/", requireAuth, async (req, res) => {
       if (!student) { res.json([]); return; }
       conditions.push(eq(attendanceTable.studentId, student.id));
       conditions.push(eq(attendanceTable.type, "student"));
+      if (dateFrom) conditions.push(gte(attendanceTable.date, String(dateFrom)));
+      if (dateTo)   conditions.push(lte(attendanceTable.date, String(dateTo)));
     } else {
-      if (date) conditions.push(eq(attendanceTable.date, String(date)));
+      // Date range takes precedence over single-date filter.
+      if (dateFrom || dateTo) {
+        if (dateFrom) conditions.push(gte(attendanceTable.date, String(dateFrom)));
+        if (dateTo)   conditions.push(lte(attendanceTable.date, String(dateTo)));
+      } else if (date) {
+        conditions.push(eq(attendanceTable.date, String(date)));
+      }
       if (type) conditions.push(eq(attendanceTable.type, String(type) as "student" | "staff"));
       if (classId) {
         const classStudents = await db
@@ -154,6 +162,11 @@ router.get("/", requireAuth, async (req, res) => {
         const ids = classStudents.map(s => s.id);
         if (ids.length > 0) {
           conditions.push(sql`${attendanceTable.studentId} = ANY(ARRAY[${sql.join(ids.map(id => sql`${id}`), sql`, `)}])`);
+        } else {
+          // Class has no students — return zero records instead of falling
+          // through to an unfiltered result.
+          res.json([]);
+          return;
         }
       }
     }
