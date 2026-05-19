@@ -12,6 +12,7 @@ export const feesTable = pgTable("fees", {
   paidDate: varchar("paid_date", { length: 20 }),
   status: varchar("status", { length: 20 }).notNull().default("unpaid"), // paid, unpaid, partial
   fine: numeric("fine", { precision: 10, scale: 2 }).notNull().default("0"),
+  discount: numeric("discount", { precision: 10, scale: 2 }).notNull().default("0"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

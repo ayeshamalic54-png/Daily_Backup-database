@@ -25,12 +25,15 @@ async function enrichFee(fee: Record<string, unknown>) {
   }
   const amount = Number(fee.amount ?? 0);
   const paidAmount = Number(fee.paidAmount ?? 0);
+  const fine = Number(fee.fine ?? 0);
+  const discount = Number(fee.discount ?? 0);
   return {
     ...fee,
     amount,
     paidAmount,
-    remainingAmount: amount - paidAmount,
-    fine: Number(fee.fine ?? 0),
+    fine,
+    discount,
+    remainingAmount: Math.max(0, amount + fine - discount - paidAmount),
     studentName: student?.name ?? null,
     admissionNumber: student?.admissionNumber ?? null,
     className,
@@ -136,16 +139,18 @@ router.post("/:id/pay", requireAuth, async (req, res) => {
   try {
     const reqUser = (req as AuthReq).user;
     if (reqUser.role === "student") { res.status(403).json({ error: "Forbidden" }); return; }
-    const { paidAmount } = req.body;
+    const { paidAmount, discount } = req.body;
     const [existing] = await db.select().from(feesTable).where(eq(feesTable.id, Number(req.params.id)));
     if (!existing) { res.status(404).json({ error: "Fee not found" }); return; }
-    const totalAmount = Number(existing.amount) + Number(existing.fine ?? 0);
+    const discountAmount = Math.max(0, Number(discount ?? 0));
+    const totalAmount = Math.max(0, Number(existing.amount) + Number(existing.fine ?? 0) - discountAmount);
     const newPaid = Math.min(Number(paidAmount), totalAmount);
     const status = newPaid >= totalAmount ? "paid" : newPaid > 0 ? "partial" : "unpaid";
     const [updated] = await db
       .update(feesTable)
       .set({
         paidAmount: String(newPaid),
+        discount:   String(discountAmount),
         status,
         paidDate: status === "paid" ? new Date().toISOString().split("T")[0] : null,
       })

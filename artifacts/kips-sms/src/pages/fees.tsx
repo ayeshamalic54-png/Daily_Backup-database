@@ -526,7 +526,9 @@ export default function Fees() {
   const [deletingId, setDeletingId]     = useState<number | null>(null);
   const [editSaving, setEditSaving]     = useState(false);
   const [payAmount, setPayAmount]       = useState("");
+  const [payDiscount, setPayDiscount]   = useState("0");
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [classFilter, setClassFilter]   = useState<string | undefined>();
   const [receipt, setReceipt]           = useState<Receipt | null>(null);
 
   // Fee structure auto-fill
@@ -539,11 +541,16 @@ export default function Fees() {
   const isAdmin     = user?.role === "admin";
   const isStudent   = user?.role === "student";
 
-  const { data: fees, isLoading } = useListFees(
-    statusFilter ? { status: statusFilter as "paid" | "unpaid" | "partial" } : {}
-  );
+  const feeQuery: Record<string, string> = {};
+  if (statusFilter) feeQuery.status = statusFilter;
+  const { data: fees, isLoading } = useListFees(feeQuery as { status?: "paid" | "unpaid" | "partial" });
   const { data: students } = useListStudents({});
   const { data: classes }  = useListClasses({});
+
+  const selectedClassName = classFilter ? classes?.find(c => String(c.id) === classFilter)?.name : undefined;
+  const displayFees = selectedClassName
+    ? (fees ?? []).filter(f => f.className === selectedClassName)
+    : fees;
   const createMutation     = useCreateFee();
   const payMutation        = usePayFee();
   const currentFee         = fees?.find(f => f.id === payOpen);
@@ -654,11 +661,14 @@ export default function Fees() {
   const handlePay = () => {
     if (!payOpen || !payAmount || !currentFee) return;
     const paid = Number(payAmount);
-    payMutation.mutate({ id: payOpen, data: { paidAmount: paid } }, {
+    const disc = Math.max(0, Number(payDiscount ?? 0));
+    payMutation.mutate({ id: payOpen, data: { paidAmount: paid, discount: disc } as never }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListFeesQueryKey() });
+        const fine = Number((currentFee as unknown as Record<string, unknown>).fine ?? 0);
+        const effectiveTotal = currentFee.amount + fine - disc;
         const totalPaid = (currentFee.paidAmount ?? 0) + paid;
-        const remaining = currentFee.amount - totalPaid;
+        const remaining = Math.max(0, effectiveTotal - totalPaid);
         setReceipt({
           receiptNo:       `RCP-${Date.now().toString().slice(-6)}`,
           studentName:     currentFee.studentName     ?? "—",
@@ -666,12 +676,13 @@ export default function Fees() {
           className:       currentFee.className       ?? "—",
           month:           currentFee.month,
           amountPaid:      paid,
-          remaining:       Math.max(0, remaining),
+          remaining,
           newStatus:       remaining <= 0 ? "paid" : "partial",
           paidDate:        new Date().toLocaleDateString("en-PK", { dateStyle: "long" }),
         });
         setPayOpen(null);
         setPayAmount("");
+        setPayDiscount("0");
       },
       onError: () => toast({ variant: "destructive", title: "Payment failed" }),
     });
@@ -724,9 +735,68 @@ export default function Fees() {
 
         {/* ── TAB 1: Fee Records ─────────────────────────────────────────────── */}
         <TabsContent value="records" className="space-y-4">
+
+          {/* Summary Cards */}
+          {!isLoading && fees && fees.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                {
+                  label: "Total Records",
+                  value: fees.length,
+                  sub: null,
+                  gradient: "from-blue-500 to-indigo-600",
+                  icon: "📋",
+                },
+                {
+                  label: "Total Amount",
+                  value: `PKR ${fees.reduce((s, f) => s + f.amount, 0).toLocaleString()}`,
+                  sub: null,
+                  gradient: "from-violet-500 to-purple-600",
+                  icon: "💰",
+                },
+                {
+                  label: "Total Paid",
+                  value: `PKR ${fees.reduce((s, f) => s + (f.paidAmount ?? 0), 0).toLocaleString()}`,
+                  sub: `${fees.filter(f => f.status === "paid").length} fully paid`,
+                  gradient: "from-emerald-500 to-green-600",
+                  icon: "✓",
+                },
+                {
+                  label: "Outstanding",
+                  value: `PKR ${fees.reduce((s, f) => s + (f.remainingAmount ?? 0), 0).toLocaleString()}`,
+                  sub: `${fees.filter(f => f.status === "unpaid").length} unpaid`,
+                  gradient: "from-rose-500 to-red-600",
+                  icon: "⚠",
+                },
+              ].map(c => (
+                <Card key={c.label} className="overflow-hidden border-0 shadow-sm">
+                  <CardContent className="p-0">
+                    <div className={`bg-gradient-to-br ${c.gradient} p-4`}>
+                      <div className="flex items-start justify-between">
+                        <p className="text-white/80 text-xs font-medium uppercase tracking-wide">{c.label}</p>
+                        <span className="text-white/60 text-base">{c.icon}</span>
+                      </div>
+                      <p className="text-white font-bold mt-1 text-base leading-tight">{c.value}</p>
+                      {c.sub && <p className="text-white/70 text-xs mt-0.5">{c.sub}</p>}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center justify-between flex-wrap gap-2">
-            {/* Status filters */}
-            <div className="flex gap-2 flex-wrap">
+            {/* Status + Class filters */}
+            <div className="flex gap-2 flex-wrap items-center">
+              <Select value={classFilter ?? "all"} onValueChange={v => setClassFilter(v === "all" ? undefined : v)}>
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue placeholder="All Classes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Classes</SelectItem>
+                  {classes?.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
               {[
                 { val: undefined, label: "All"     },
                 { val: "paid",    label: "Paid"    },
@@ -819,17 +889,17 @@ export default function Fees() {
                   <table className="w-full text-sm print:text-xs">
                     <thead className="bg-gray-50">
                       <tr>
-                        {["Student","Adm#","Class","Month","Amount","Paid","Remaining","Fine","Due Date","Status","Actions"].map(h => (
+                        {["Student","Adm#","Class","Month","Amount","Fine","Discount","Paid","Remaining","Due Date","Status","Actions"].map(h => (
                           <th key={h} className={`text-left py-3 px-3 font-semibold text-gray-600 ${h === "Actions" ? "print:hidden" : ""}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {!fees?.length ? (
+                      {!displayFees?.length ? (
                         <tr>
-                          <td colSpan={11} className="py-12 text-center text-gray-400">Koi fee record nahi mila</td>
+                          <td colSpan={12} className="py-12 text-center text-gray-400">Koi fee record nahi mila</td>
                         </tr>
-                      ) : fees.map(fee => {
+                      ) : displayFees.map(fee => {
                         const st = statusConfig[fee.status as keyof typeof statusConfig] || statusConfig.unpaid;
                         return (
                           <tr key={fee.id} className="border-b hover:bg-gray-50">
@@ -838,13 +908,18 @@ export default function Fees() {
                             <td className="py-2.5 px-3 text-gray-600">{fee.className || "—"}</td>
                             <td className="py-2.5 px-3 text-gray-600">{fee.month}</td>
                             <td className="py-2.5 px-3 font-medium">PKR {fee.amount.toLocaleString()}</td>
-                            <td className="py-2.5 px-3 text-emerald-600">PKR {(fee.paidAmount ?? 0).toLocaleString()}</td>
-                            <td className="py-2.5 px-3 font-semibold text-red-600">PKR {(fee.remainingAmount ?? 0).toLocaleString()}</td>
                             <td className="py-2.5 px-3 text-orange-600">
                               {((fee as unknown as Record<string, unknown>).fine as number ?? 0) > 0
                                 ? `PKR ${((fee as unknown as Record<string, unknown>).fine as number).toLocaleString()}`
                                 : "—"}
                             </td>
+                            <td className="py-2.5 px-3 text-blue-600">
+                              {((fee as unknown as Record<string, unknown>).discount as number ?? 0) > 0
+                                ? `PKR ${((fee as unknown as Record<string, unknown>).discount as number).toLocaleString()}`
+                                : "—"}
+                            </td>
+                            <td className="py-2.5 px-3 text-emerald-600">PKR {(fee.paidAmount ?? 0).toLocaleString()}</td>
+                            <td className="py-2.5 px-3 font-semibold text-red-600">PKR {(fee.remainingAmount ?? 0).toLocaleString()}</td>
                             <td className="py-2.5 px-3 text-gray-500">{fee.dueDate}</td>
                             <td className="py-2.5 px-3">
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${st.className}`}>{fee.status}</span>
@@ -898,42 +973,101 @@ export default function Fees() {
       </Tabs>
 
       {/* ── Pay Dialog ─────────────────────────────────────────────────────────── */}
-      <Dialog open={!!payOpen} onOpenChange={() => { setPayOpen(null); setPayAmount(""); }}>
+      <Dialog open={!!payOpen} onOpenChange={() => { setPayOpen(null); setPayAmount(""); setPayDiscount("0"); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Payment Record Karo</DialogTitle></DialogHeader>
-          {currentFee && (
-            <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
-                <div className="flex justify-between"><span className="text-gray-500">Student:</span><span className="font-medium">{currentFee.studentName}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Month:</span><span>{currentFee.month}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Total:</span><span className="font-bold">PKR {currentFee.amount.toLocaleString()}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Paid:</span><span className="text-emerald-600">PKR {(currentFee.paidAmount ?? 0).toLocaleString()}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Remaining:</span><span className="text-red-600 font-bold">PKR {(currentFee.remainingAmount ?? 0).toLocaleString()}</span></div>
+          <DialogHeader>
+            <DialogTitle>Fee Payment</DialogTitle>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {currentFee?.studentName} — {currentFee?.month}
+            </p>
+          </DialogHeader>
+          {currentFee && (() => {
+            const fine = Number((currentFee as unknown as Record<string, unknown>).fine ?? 0);
+            const disc = Math.max(0, Number(payDiscount || 0));
+            const effectiveTotal = Math.max(0, currentFee.amount + fine - disc);
+            const alreadyPaid = currentFee.paidAmount ?? 0;
+            const netRemaining = Math.max(0, effectiveTotal - alreadyPaid);
+            return (
+              <div className="space-y-4">
+                {/* Fee Summary */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Fee Amount:</span>
+                    <span className="font-medium">PKR {currentFee.amount.toLocaleString()}</span>
+                  </div>
+                  {fine > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Fine:</span>
+                      <span className="text-orange-600">+PKR {fine.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {disc > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Discount:</span>
+                      <span className="text-blue-600">-PKR {disc.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {alreadyPaid > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Previously Paid:</span>
+                      <span className="text-emerald-600">PKR {alreadyPaid.toLocaleString()}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t pt-1.5 mt-1">
+                    <span className="font-semibold text-gray-700">Now Remaining:</span>
+                    <span className="text-red-600 font-bold">PKR {netRemaining.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {/* Discount */}
+                {isAdmin && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Discount (PKR) <span className="text-gray-400 font-normal">— optional</span></label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={payDiscount}
+                      onChange={e => setPayDiscount(e.target.value)}
+                      className="mt-1"
+                      placeholder="0"
+                    />
+                  </div>
+                )}
+
+                {/* Amount to collect */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Amount Received (PKR) <span className="text-red-500">*</span></label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={netRemaining}
+                    value={payAmount}
+                    onChange={e => setPayAmount(e.target.value)}
+                    className="mt-1 text-lg font-semibold"
+                    placeholder={String(netRemaining)}
+                  />
+                  {Number(payAmount) > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      After payment: remaining = PKR {Math.max(0, netRemaining - Number(payAmount)).toLocaleString()}
+                      {Number(payAmount) >= netRemaining ? " ✓ Fully Paid" : ""}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => { setPayOpen(null); setPayAmount(""); setPayDiscount("0"); }}>Cancel</Button>
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    onClick={handlePay}
+                    disabled={!payAmount || Number(payAmount) <= 0 || payMutation.isPending}
+                  >
+                    {payMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                    Confirm Payment
+                  </Button>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700">Amount Received (PKR)</label>
-                <Input
-                  type="number"
-                  value={payAmount}
-                  onChange={e => setPayAmount(e.target.value)}
-                  className="mt-1"
-                  placeholder="Enter amount"
-                  max={currentFee.remainingAmount ?? currentFee.amount}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => { setPayOpen(null); setPayAmount(""); }}>Cancel</Button>
-                <Button
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                  onClick={handlePay}
-                  disabled={!payAmount || payMutation.isPending}
-                >
-                  {payMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                  Payment Confirm Karo
-                </Button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

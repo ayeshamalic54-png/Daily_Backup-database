@@ -430,7 +430,19 @@ export default function Students() {
                   data-testid="input-search-students"
                 />
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
+                <Select
+                  value={classIdFilter ?? "all"}
+                  onValueChange={v => v === "all" ? setLocation("/students") : setLocation(`/students?classId=${v}`)}
+                >
+                  <SelectTrigger className="h-9 w-[150px]">
+                    <SelectValue placeholder="All Classes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Classes</SelectItem>
+                    {classes?.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
                 {["all", "active", "inactive", "left"].map(s => (
                   <Button key={s} size="sm"
                     variant={(s === "all" && !statusFilter) || statusFilter === s ? "default" : "outline"}
