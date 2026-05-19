@@ -102,6 +102,10 @@ export default function FeeVoucher() {
     return f.month === month && student && String(student.classId) === selectedClass;
   });
 
+  // Auto-show vouchers if already saved in DB (so re-visiting the page shows them, not "Generate")
+  const hasExistingVouchers = savedFeeRecords.length > 0;
+  const showVouchers = generated || hasExistingVouchers;
+
   const toggleFeeType = (key: FeeKey) => {
     setSelectedFeeTypes(prev => {
       const next = new Set(prev);
@@ -254,16 +258,18 @@ export default function FeeVoucher() {
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2 items-center">
             <Button
-              disabled={!selectedClass || !month || saving || classStudents.length === 0}
+              disabled={!selectedClass || !month || saving || classStudents.length === 0 || hasExistingVouchers}
               onClick={handleGenerate}
               style={{ background: `linear-gradient(135deg, ${NAVY}, #2d4a9a)`, color: "#fff" }}
             >
               {saving
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving... ({savedCount}/{classStudents.length})</>
-                : <><Save className="w-4 h-4 mr-2" /> Save & Generate ({classStudents.length} students)</>}
+                : hasExistingVouchers
+                  ? <><CheckCircle2 className="w-4 h-4 mr-2" /> Vouchers Already Saved ({savedFeeRecords.length})</>
+                  : <><Save className="w-4 h-4 mr-2" /> Save & Generate ({classStudents.length} students)</>}
             </Button>
 
-            {generated && classStudents.length > 0 && (
+            {showVouchers && classStudents.length > 0 && (
               <Button variant="outline" onClick={() => window.print()}>
                 <Printer className="w-4 h-4 mr-2" /> Print All Vouchers
               </Button>
@@ -283,7 +289,7 @@ export default function FeeVoucher() {
           </div>
 
           {/* Success / Error */}
-          {generated && savedCount > 0 && (
+          {generated && savedCount > 0 && !hasExistingVouchers && (
             <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
               <span><strong>{savedCount}</strong> students' fees saved to database.</span>
@@ -295,12 +301,12 @@ export default function FeeVoucher() {
         </CardContent>
       </Card>
 
-      {generated && classStudents.length === 0 && (
+      {showVouchers && classStudents.length === 0 && (
         <p className="text-center text-gray-500 py-12">No active students found in this class.</p>
       )}
 
       {/* Vouchers */}
-      {generated && classStudents.length > 0 && (
+      {showVouchers && classStudents.length > 0 && (
         <div id="vouchers">
           {classStudents.map((student, idx) => {
             // Find saved DB record for this student+month (for edit button)

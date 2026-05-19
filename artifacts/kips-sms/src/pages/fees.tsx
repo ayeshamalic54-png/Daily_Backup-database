@@ -21,7 +21,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -789,7 +788,7 @@ export default function Fees() {
       <div className="flex items-center justify-between no-print">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Fee Management</h1>
-          <p className="text-gray-500 text-sm mt-1">Fee records manage karo aur class-wise fee structure set karo</p>
+          <p className="text-gray-500 text-sm mt-1">Manage fee records and payments</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => window.print()}>
           <Printer className="w-4 h-4 mr-1" /> Print
@@ -807,19 +806,9 @@ export default function Fees() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="records" className="no-print">
-        <TabsList className="mb-4">
-          <TabsTrigger value="records" className="flex items-center gap-2">
-            <LayoutList className="w-4 h-4" /> Fee Records
-          </TabsTrigger>
-          <TabsTrigger value="structure" className="flex items-center gap-2">
-            <BookOpen className="w-4 h-4" /> Fee Structure
-          </TabsTrigger>
-        </TabsList>
-
-        {/* ── TAB 1: Fee Records ─────────────────────────────────────────────── */}
-        <TabsContent value="records" className="space-y-4">
+      {/* Fee Records (Fee Structure has its own dedicated page in the sidebar) */}
+      <div className="no-print">
+        <div className="space-y-4">
 
           {/* Summary Cards */}
           {!isLoading && fees && fees.length > 0 && (
@@ -1095,13 +1084,8 @@ export default function Fees() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* ── TAB 2: Fee Structure ───────────────────────────────────────────── */}
-        <TabsContent value="structure">
-          <FeeStructureTab isAdmin={isAdmin} />
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       {/* ── Pay Dialog ─────────────────────────────────────────────────────────── */}
       <Dialog open={!!payOpen} onOpenChange={() => { setPayOpen(null); setPayAmount(""); setPayDiscount("0"); }}>
