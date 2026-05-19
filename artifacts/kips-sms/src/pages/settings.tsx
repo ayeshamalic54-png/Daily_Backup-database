@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Upload, Trash2, RefreshCw, Shield, Database, Clock, CheckCircle, CalendarClock, Play, AlertCircle, Zap, RotateCcw } from "lucide-react";
+import { Download, Upload, Trash2, RefreshCw, Shield, Database, Clock, CheckCircle, CalendarClock, Play, AlertCircle, Zap, RotateCcw, Calculator, Save } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 interface SavedBackup {
   filename: string;
@@ -36,6 +37,13 @@ async function apiFetch(path: string, opts: RequestInit = {}) {
   return res;
 }
 
+interface DeductionCriteria {
+  workingDaysPerMonth: number;
+  absentPenaltyFraction: string;
+  latePenaltyFraction: string;
+  leavePenaltyFraction: string;
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -48,8 +56,64 @@ export default function Settings() {
   const [loadingAutoStatus, setLoadingAutoStatus] = useState(false);
   const [runningNow, setRunningNow] = useState(false);
 
+  // ── Deduction criteria ──────────────────────────────────────────────────────
+  const [criteria, setCriteria] = useState<DeductionCriteria>({
+    workingDaysPerMonth: 26,
+    absentPenaltyFraction: "1.00",
+    latePenaltyFraction:   "0.50",
+    leavePenaltyFraction:  "0.00",
+  });
+  const [criteriaLoading, setCriteriaLoading] = useState(false);
+  const [criteriaSaving,  setCriteriaSaving]  = useState(false);
+
+  const loadCriteria = async () => {
+    setCriteriaLoading(true);
+    try {
+      const res = await fetch("/api/settings", { headers: authHeader() as HeadersInit });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      setCriteria({
+        workingDaysPerMonth:   Number(data.workingDaysPerMonth)   || 26,
+        absentPenaltyFraction: String(data.absentPenaltyFraction ?? "1.00"),
+        latePenaltyFraction:   String(data.latePenaltyFraction   ?? "0.50"),
+        leavePenaltyFraction:  String(data.leavePenaltyFraction  ?? "0.00"),
+      });
+    } catch {
+      toast({ variant: "destructive", title: "Failed to load deduction criteria" });
+    } finally {
+      setCriteriaLoading(false);
+    }
+  };
+
+  const saveCriteria = async () => {
+    setCriteriaSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { ...authHeader(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workingDaysPerMonth:   Number(criteria.workingDaysPerMonth),
+          absentPenaltyFraction: Number(criteria.absentPenaltyFraction),
+          latePenaltyFraction:   Number(criteria.latePenaltyFraction),
+          leavePenaltyFraction:  Number(criteria.leavePenaltyFraction),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed");
+      }
+      toast({ title: "Deduction criteria saved ✓", description: "New rules apply to future deduction calculations." });
+      await loadCriteria();
+    } catch (err: unknown) {
+      toast({ variant: "destructive", title: "Save failed", description: String(err) });
+    } finally {
+      setCriteriaSaving(false);
+    }
+  };
+
   useEffect(() => {
     loadAutoStatus();
+    loadCriteria();
   }, []);
 
   const loadAutoStatus = async () => {
@@ -220,8 +284,125 @@ export default function Settings() {
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <Shield className="w-6 h-6 text-blue-600" /> Settings & Backup
         </h1>
-        <p className="text-gray-500 text-sm mt-1">Manage system backups and data restore</p>
+        <p className="text-gray-500 text-sm mt-1">Manage deduction criteria, system backups, and data restore</p>
       </div>
+
+      {/* Deduction Criteria */}
+      <Card className="border-0 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-amber-500 to-orange-600 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Calculator className="w-5 h-5 text-white" />
+            <h2 className="text-white font-semibold text-base">Deduction Criteria</h2>
+          </div>
+          <p className="text-white/80 text-xs mt-1">
+            Controls how attendance affects salary &amp; fee deductions. Per-day rate = amount ÷ working days. Each absent/late/leave day deducts (per-day × fraction).
+          </p>
+        </div>
+        <CardContent className="p-5 space-y-4">
+          {criteriaLoading ? (
+            <div className="flex items-center gap-2 text-gray-400 text-sm">
+              <RefreshCw className="w-4 h-4 animate-spin" /> Loading criteria…
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">
+                    Working Days / Month
+                  </label>
+                  <Input
+                    type="number" min={1} max={31}
+                    value={criteria.workingDaysPerMonth}
+                    onChange={e => setCriteria(c => ({ ...c, workingDaysPerMonth: Number(e.target.value) || 0 }))}
+                    className="h-9"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">Used to compute per-day rate (default 26)</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">
+                    Absent Penalty (× per-day)
+                  </label>
+                  <Input
+                    type="number" min={0} max={5} step="0.05"
+                    value={criteria.absentPenaltyFraction}
+                    onChange={e => setCriteria(c => ({ ...c, absentPenaltyFraction: e.target.value }))}
+                    className="h-9"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">1.00 = full day deducted (default)</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">
+                    Late Penalty (× per-day)
+                  </label>
+                  <Input
+                    type="number" min={0} max={5} step="0.05"
+                    value={criteria.latePenaltyFraction}
+                    onChange={e => setCriteria(c => ({ ...c, latePenaltyFraction: e.target.value }))}
+                    className="h-9"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">0.50 = half day deducted (default)</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">
+                    Leave Penalty (× per-day)
+                  </label>
+                  <Input
+                    type="number" min={0} max={5} step="0.05"
+                    value={criteria.leavePenaltyFraction}
+                    onChange={e => setCriteria(c => ({ ...c, leavePenaltyFraction: e.target.value }))}
+                    className="h-9"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">0.00 = no deduction (default)</p>
+                </div>
+              </div>
+
+              {/* Live example */}
+              {(() => {
+                const wd  = Number(criteria.workingDaysPerMonth) || 26;
+                const af  = Number(criteria.absentPenaltyFraction);
+                const lf  = Number(criteria.latePenaltyFraction);
+                const lvf = Number(criteria.leavePenaltyFraction);
+                const example = 26000;
+                const perDay = Math.round(example / wd);
+                return (
+                  <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm">
+                    <p className="text-xs font-semibold text-amber-800 mb-1">Example: salary PKR {example.toLocaleString()}</p>
+                    <div className="text-xs text-amber-700 space-y-0.5">
+                      <div>Per-day rate: <strong>PKR {perDay.toLocaleString()}</strong> (= {example.toLocaleString()} ÷ {wd})</div>
+                      <div>1 absent day = <strong>−PKR {Math.round(perDay * af).toLocaleString()}</strong></div>
+                      <div>1 late day = <strong>−PKR {Math.round(perDay * lf).toLocaleString()}</strong></div>
+                      <div>1 leave day = <strong>−PKR {Math.round(perDay * lvf).toLocaleString()}</strong></div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex items-center gap-3 pt-1">
+                <Button
+                  onClick={saveCriteria}
+                  disabled={criteriaSaving}
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  {criteriaSaving
+                    ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Saving…</>
+                    : <><Save className="w-4 h-4 mr-2" /> Save Criteria</>
+                  }
+                </Button>
+                <Button variant="outline" size="sm" onClick={loadCriteria} disabled={criteriaLoading}>
+                  <RefreshCw className={`w-3.5 h-3.5 mr-1 ${criteriaLoading ? "animate-spin" : ""}`} /> Reload
+                </Button>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-blue-700">
+                  Changes apply to <strong>future</strong> calculations: Monthly Deductions report, Salary Slip auto-fill, and Student deductions. Already-saved salaries are not recomputed.
+                </p>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Auto Daily Backup */}
       <Card className="border-0 shadow-sm overflow-hidden">

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { attendanceTable, studentsTable, staffTable, classesTable, salariesTable } from "@workspace/db";
+import { attendanceTable, studentsTable, staffTable, classesTable, salariesTable, settingsTable } from "@workspace/db";
 import { eq, and, like, sql, gte, lte } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import type { Request } from "express";
@@ -77,6 +77,14 @@ router.get("/monthly-deductions", requireAuth, async (req, res) => {
       )
     );
 
+    // Load configurable deduction criteria from settings table (single-row, id=1).
+    // Fallback to sensible defaults if row is missing.
+    const [settingsRow] = await db.select().from(settingsTable).where(eq(settingsTable.id, 1));
+    const workingDays = settingsRow?.workingDaysPerMonth   ?? 26;
+    const absentFrac  = Number(settingsRow?.absentPenaltyFraction ?? 1);
+    const lateFrac    = Number(settingsRow?.latePenaltyFraction   ?? 0.5);
+    const leaveFrac   = Number(settingsRow?.leavePenaltyFraction  ?? 0);
+
     if (type === "staff") {
       const staffList = await db.select().from(staffTable);
       const salaryRecords = await db.select().from(salariesTable).where(
@@ -90,12 +98,13 @@ router.get("/monthly-deductions", requireAuth, async (req, res) => {
         const leave      = staffRecs.filter(r => r.status === "leave").length;
         const salary     = salaryRecords.find(sal => sal.staffId === s.id);
         const basicSalary = salary ? Number(salary.amount) : Number(s.salary ?? 0);
-        const perDay     = Math.round(basicSalary / 26);
-        const absentDed  = absent * perDay;
-        const lateDed    = late * Math.round(perDay / 2);
-        const totalDeduction = absentDed + lateDed;
+        const perDay     = Math.round(basicSalary / workingDays);
+        const absentDed  = Math.round(absent * perDay * absentFrac);
+        const lateDed    = Math.round(late   * perDay * lateFrac);
+        const leaveDed   = Math.round(leave  * perDay * leaveFrac);
+        const totalDeduction = absentDed + lateDed + leaveDed;
         const netSalary  = basicSalary - totalDeduction;
-        return { id: s.id, name: s.name, role: s.role, basicSalary, perDay, absent, late, present, leave, absentDed, lateDed, totalDeduction, netSalary, salaryId: salary?.id ?? null, salaryStatus: salary?.status ?? null };
+        return { id: s.id, name: s.name, role: s.role, basicSalary, perDay, absent, late, present, leave, absentDed, lateDed, leaveDed, totalDeduction, netSalary, salaryId: salary?.id ?? null, salaryStatus: salary?.status ?? null };
       }).filter(s => s.basicSalary > 0 || s.absent + s.late + s.present + s.leave > 0);
       res.json(result);
     } else {
@@ -112,12 +121,13 @@ router.get("/monthly-deductions", requireAuth, async (req, res) => {
         const present    = stuRecs.filter(r => r.status === "present").length;
         const leave      = stuRecs.filter(r => r.status === "leave").length;
         const feeAmount  = Number(s.feeAmount ?? 0);
-        const perDay     = Math.round(feeAmount / 26);
-        const absentDed  = absent * perDay;
-        const lateDed    = late * Math.round(perDay / 2);
-        const totalDeduction = absentDed + lateDed;
+        const perDay     = Math.round(feeAmount / workingDays);
+        const absentDed  = Math.round(absent * perDay * absentFrac);
+        const lateDed    = Math.round(late   * perDay * lateFrac);
+        const leaveDed   = Math.round(leave  * perDay * leaveFrac);
+        const totalDeduction = absentDed + lateDed + leaveDed;
         const netFee     = feeAmount - totalDeduction;
-        return { id: s.id, name: s.name, className: cls?.name ?? "—", feeAmount, perDay, absent, late, present, leave, absentDed, lateDed, totalDeduction, netFee };
+        return { id: s.id, name: s.name, className: cls?.name ?? "—", feeAmount, perDay, absent, late, present, leave, absentDed, lateDed, leaveDed, totalDeduction, netFee };
       });
       res.json(result);
     }

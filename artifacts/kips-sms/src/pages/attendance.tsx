@@ -249,6 +249,10 @@
                   const queryClient = useQueryClient();
                   const [bulkType,  setBulkType]  = useState<"student" | "staff">("student");
                   const [bulkDate,  setBulkDate]  = useState(new Date().toISOString().split("T")[0]);
+                  // Optional end date for a range. When equal to bulkDate (or empty)
+                  // we save a single day, otherwise we save the same status for every
+                  // day in [bulkDate .. bulkDateTo].
+                  const [bulkDateTo, setBulkDateTo] = useState(new Date().toISOString().split("T")[0]);
                   const [classId,   setClassId]   = useState<string>("");
                   const [rows,      setRows]      = useState<BulkRow[]>([]);
                   const [saving,    setSaving]    = useState(false);
@@ -280,17 +284,41 @@
                   const setAll = (status: BulkRow["status"]) =>
                     setRows(prev => prev.map(r => ({ ...r, status })));
 
+                  // Build list of YYYY-MM-DD strings between `from` and `to` (inclusive).
+                  // Returns just `[from]` if `to` is empty or earlier than `from`.
+                  const datesInRange = (from: string, to: string): string[] => {
+                    if (!from) return [];
+                    if (!to || to < from) return [from];
+                    const out: string[] = [];
+                    const cur = new Date(from + "T00:00:00Z");
+                    const end = new Date(to   + "T00:00:00Z");
+                    while (cur <= end) {
+                      out.push(cur.toISOString().slice(0, 10));
+                      cur.setUTCDate(cur.getUTCDate() + 1);
+                    }
+                    return out;
+                  };
+
                   const handleSave = async () => {
                     if (!rows.length) return;
+                    const dates = datesInRange(bulkDate, bulkDateTo);
+                    if (!dates.length) return;
+                    // Safety guard: bulk × range can grow large. Warn for big jobs.
+                    const total = dates.length * rows.length;
+                    if (total > 2000 && !window.confirm(
+                      `This will save ${total} records (${rows.length} people × ${dates.length} days). Continue?`
+                    )) return;
                     setSaving(true);
                     try {
-                      const records = rows.map(r => ({
-                        date:      bulkDate,
-                        type:      bulkType,
-                        status:    r.status,
-                        studentId: bulkType === "student" ? r.id : null,
-                        staffId:   bulkType === "staff"   ? r.id : null,
-                      }));
+                      const records = dates.flatMap(d =>
+                        rows.map(r => ({
+                          date:      d,
+                          type:      bulkType,
+                          status:    r.status,
+                          studentId: bulkType === "student" ? r.id : null,
+                          staffId:   bulkType === "staff"   ? r.id : null,
+                        }))
+                      );
                       const res = await fetch("/api/attendance/bulk", {
                         method:  "POST",
                         headers: { "Content-Type": "application/json", ...authHeader() },
@@ -298,7 +326,8 @@
                       });
                       if (!res.ok) throw new Error("Failed");
                       const data = await res.json() as { saved: number };
-                      toast({ title: `✓ ${data.saved} attendance records saved for ${bulkDate}` });
+                      const rangeLabel = dates.length === 1 ? bulkDate : `${dates[0]} → ${dates[dates.length - 1]} (${dates.length} days)`;
+                      toast({ title: `✓ ${data.saved} attendance records saved for ${rangeLabel}` });
                       // Refresh the Daily tab and any dependent views so the new records show immediately.
                       queryClient.invalidateQueries({ queryKey: getListAttendanceQueryKey(), refetchType: "all" });
                       setLoaded(false);
@@ -320,7 +349,7 @@
                       {/* Controls */}
                       <Card>
                         <CardContent className="p-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                             <div>
                               <label className="text-xs font-medium text-gray-600 block mb-1">Type</label>
                               <div className="flex gap-2">
@@ -338,11 +367,29 @@
                             </div>
 
                             <div>
-                              <label className="text-xs font-medium text-gray-600 block mb-1">Date</label>
+                              <label className="text-xs font-medium text-gray-600 block mb-1">Date From</label>
                               <Input
                                 type="date"
                                 value={bulkDate}
-                                onChange={e => { setBulkDate(e.target.value); setLoaded(false); setRows([]); }}
+                                onChange={e => {
+                                  const v = e.target.value;
+                                  setBulkDate(v);
+                                  if (v && bulkDateTo && v > bulkDateTo) setBulkDateTo(v);
+                                  setLoaded(false); setRows([]);
+                                }}
+                                className="h-9"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-xs font-medium text-gray-600 block mb-1">
+                                Date To <span className="text-gray-400 font-normal">(same day if blank)</span>
+                              </label>
+                              <Input
+                                type="date"
+                                value={bulkDateTo}
+                                min={bulkDate}
+                                onChange={e => { setBulkDateTo(e.target.value); setLoaded(false); setRows([]); }}
                                 className="h-9"
                               />
                             </div>

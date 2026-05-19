@@ -9,3 +9,4 @@ export * from "./salaries";
 export * from "./accounts";
 export * from "./certificates";
 export * from "./fee-structures";
+export * from "./settings";

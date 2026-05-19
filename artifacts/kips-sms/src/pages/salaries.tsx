@@ -159,9 +159,24 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
 
   const values      = form.watch();
   const basicSalary = salary.amount;
-  const perDay      = Math.round(basicSalary / 26);
-  const absentDed   = Number(values.absentDays || 0) * perDay;
-  const lateDed     = Number(values.lateDays   || 0) * Math.round(perDay / 2);
+  // Read live deduction criteria from settings (cached by React Query elsewhere
+  // or via a one-off fetch on mount). Fallbacks match prior hardcoded defaults
+  // so legacy installs without settings keep working.
+  const [cfg, setCfg] = useState<{ workingDaysPerMonth: number; absentPenaltyFraction: string; latePenaltyFraction: string; leavePenaltyFraction: string }>({
+    workingDaysPerMonth: 26, absentPenaltyFraction: "1.00", latePenaltyFraction: "0.50", leavePenaltyFraction: "0.00",
+  });
+  useEffect(() => {
+    fetch("/api/settings", { headers: authHeader() as HeadersInit })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setCfg(d); })
+      .catch(() => {});
+  }, []);
+  const workingDays = cfg.workingDaysPerMonth || 26;
+  const absentFrac  = Number(cfg.absentPenaltyFraction);
+  const lateFrac    = Number(cfg.latePenaltyFraction);
+  const perDay      = Math.round(basicSalary / workingDays);
+  const absentDed   = Math.round(Number(values.absentDays || 0) * perDay * absentFrac);
+  const lateDed     = Math.round(Number(values.lateDays   || 0) * perDay * lateFrac);
   const taxDed      = Number(values.tax        || 0);
   const otherDed    = Number(values.otherDeduction || 0);
   const allowance   = Number(values.allowance  || 0);

@@ -13,6 +13,7 @@ import accountsRouter from "./accounts";
 import certificatesRouter from "./certificates";
 import adminRouter from "./admin";
 import feeStructureRouter from "./fee-structure";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use("/accounts", accountsRouter);
 router.use("/certificates", certificatesRouter);
 router.use("/admin", adminRouter);
 router.use("/fee-structures", feeStructureRouter);
+router.use("/settings", settingsRouter);
 
 export default router;
