@@ -56,6 +56,35 @@ router.post("/expenses", requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/accounts/:id
+router.put("/:id", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [entry] = await db
+      .update(accountEntriesTable)
+      .set({ amount: req.body.amount, category: req.body.category, description: req.body.description, date: req.body.date })
+      .where(eq(accountEntriesTable.id, id))
+      .returning();
+    if (!entry) { res.status(404).json({ error: "Not found" }); return; }
+    res.json({ ...entry, amount: Number(entry.amount) });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /api/accounts/:id
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await db.delete(accountEntriesTable).where(eq(accountEntriesTable.id, id));
+    res.status(204).end();
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // GET /api/accounts/summary
 router.get("/summary", requireAuth, async (req, res) => {
   try {

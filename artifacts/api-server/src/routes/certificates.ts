@@ -49,4 +49,16 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// DELETE /api/certificates/:id
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await db.delete(certificatesTable).where(eq(certificatesTable.id, id));
+    res.status(204).end();
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

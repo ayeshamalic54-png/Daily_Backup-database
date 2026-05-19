@@ -5,7 +5,7 @@ import {
   useGetAccountSummary, useListFees, useListSalaries,
   getListIncomeQueryKey, getListExpensesQueryKey, getGetAccountSummaryQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, Printer, TrendingUp, TrendingDown, DollarSign, CreditCard, Banknote } from "lucide-react";
+import { Plus, Loader2, Printer, TrendingUp, TrendingDown, DollarSign, CreditCard, Banknote, Pencil, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 // ─── PRINT CSS ────────────────────────────────────────────────────────────────
 const PRINT_STYLES = `
@@ -54,9 +55,13 @@ const schema = z.object({
 
 const printDate = new Date().toLocaleDateString("en-PK", { day: "numeric", month: "long", year: "numeric" });
 
+function apiToken() { return localStorage.getItem("kips_token") ?? ""; }
+
 export default function Accounts() {
   const [addIncomeOpen,  setAddIncomeOpen]  = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
+  const [editEntry, setEditEntry] = useState<{ id: number; type: string; amount: string; category: string; description: string; date: string } | null>(null);
+  const [deleteId,  setDeleteId]  = useState<number | null>(null);
   const currentMonth = new Date().toISOString().slice(0, 7);
   const { toast }   = useToast();
   const queryClient = useQueryClient();
@@ -95,6 +100,49 @@ export default function Accounts() {
   const totalExpensesValue = manualExpenses + salaryPaidTotal;
   const netProfitValue     = totalIncomeValue - totalExpensesValue;
   const isLoadingAny       = summaryLoading || feesLoading || incomeLoading || expensesLoading || salariesLoading;
+
+  // ── Edit / Delete mutations ────────────────────────────────────────────────
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: getListIncomeQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getGetAccountSummaryQueryKey() });
+  };
+
+  const updateEntry = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: object }) => {
+      const res = await fetch(`/api/accounts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken()}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    onSuccess: () => { invalidateAll(); toast({ title: "Entry updated" }); setEditEntry(null); },
+    onError:   () => toast({ variant: "destructive", title: "Failed to update" }),
+  });
+
+  const deleteEntry = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/accounts/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${apiToken()}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+    },
+    onSuccess: () => { invalidateAll(); toast({ title: "Entry deleted" }); setDeleteId(null); },
+    onError:   () => toast({ variant: "destructive", title: "Failed to delete" }),
+  });
+
+  const editForm = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+    defaultValues: { date: new Date().toISOString().split("T")[0] },
+  });
+
+  const onEditSubmit = (values: z.infer<typeof schema>) => {
+    if (!editEntry) return;
+    updateEntry.mutate({ id: editEntry.id, data: { ...values, amount: Number(values.amount) } });
+  };
 
   // ── Forms ──────────────────────────────────────────────────────────────────
   const createIncome  = useCreateIncome();
@@ -386,6 +434,32 @@ export default function Accounts() {
     <>
       {printPortal}
 
+      {/* ── Edit Entry Dialog ─────────────────────────────────────────────── */}
+      <Dialog open={!!editEntry} onOpenChange={v => { if (!v) setEditEntry(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit {editEntry?.type === "income" ? "Income" : "Expense"} Entry</DialogTitle>
+          </DialogHeader>
+          <EntryForm form={editForm} onSubmit={onEditSubmit} isPending={updateEntry.isPending} type={editEntry?.type as "income" | "expense" ?? "income"} />
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirmation ───────────────────────────────────────────── */}
+      <AlertDialog open={deleteId !== null} onOpenChange={v => { if (!v) setDeleteId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => deleteId !== null && deleteEntry.mutate(deleteId)} disabled={deleteEntry.isPending}>
+              {deleteEntry.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -542,19 +616,23 @@ export default function Accounts() {
                 ) : (
                   <table className="w-full text-sm">
                     <thead className="bg-emerald-50">
-                      <tr>{["Date", "Category", "Description", "Amount (PKR)"].map(h => (
+                      <tr>{["Date", "Category", "Description", "Amount (PKR)", ""].map(h => (
                         <th key={h} className="text-left py-3 px-3 font-semibold text-emerald-800">{h}</th>
                       ))}</tr>
                     </thead>
                     <tbody>
                       {!income?.length
-                        ? <tr><td colSpan={4} className="py-8 text-center text-gray-400">No other income records this month</td></tr>
+                        ? <tr><td colSpan={5} className="py-8 text-center text-gray-400">No other income records this month</td></tr>
                         : income?.map(entry => (
                           <tr key={entry.id} className="border-b hover:bg-gray-50" data-testid={`row-income-${entry.id}`}>
                             <td className="py-2.5 px-3 text-gray-600">{entry.date}</td>
                             <td className="py-2.5 px-3 text-gray-700">{entry.category}</td>
                             <td className="py-2.5 px-3 text-gray-600">{entry.description}</td>
                             <td className="py-2.5 px-3 font-bold text-emerald-600">PKR {entry.amount.toLocaleString()}</td>
+                            <td className="py-2.5 px-2 flex gap-1 items-center">
+                              <button onClick={() => { setEditEntry({ id: entry.id, type: "income", amount: String(entry.amount), category: entry.category, description: entry.description ?? "", date: entry.date }); editForm.reset({ amount: String(entry.amount), category: entry.category, description: entry.description ?? "", date: entry.date }); }} className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => setDeleteId(entry.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                            </td>
                           </tr>
                         ))
                       }
@@ -564,6 +642,7 @@ export default function Accounts() {
                         <tr>
                           <td colSpan={3} className="py-2.5 px-3 font-semibold text-emerald-800">Total Other Income</td>
                           <td className="py-2.5 px-3 font-bold text-emerald-700">PKR {manualIncomeTotal.toLocaleString()}</td>
+                          <td />
                         </tr>
                       </tfoot>
                     )}
@@ -589,19 +668,23 @@ export default function Accounts() {
                     {/* Manual Expenses */}
                     <table className="w-full text-sm">
                       <thead className="bg-red-50">
-                        <tr>{["Date", "Category", "Description", "Amount (PKR)"].map(h => (
+                        <tr>{["Date", "Category", "Description", "Amount (PKR)", ""].map(h => (
                           <th key={h} className="text-left py-3 px-3 font-semibold text-red-800">{h}</th>
                         ))}</tr>
                       </thead>
                       <tbody>
                         {!expenses?.length
-                          ? <tr><td colSpan={4} className="py-6 text-center text-gray-400">No manual expense records this month</td></tr>
+                          ? <tr><td colSpan={5} className="py-6 text-center text-gray-400">No manual expense records this month</td></tr>
                           : expenses?.map(entry => (
                             <tr key={entry.id} className="border-b hover:bg-gray-50" data-testid={`row-expense-${entry.id}`}>
                               <td className="py-2.5 px-3 text-gray-600">{entry.date}</td>
                               <td className="py-2.5 px-3 text-gray-700">{entry.category}</td>
                               <td className="py-2.5 px-3 text-gray-600">{entry.description}</td>
                               <td className="py-2.5 px-3 font-bold text-red-600">PKR {entry.amount.toLocaleString()}</td>
+                              <td className="py-2.5 px-2 flex gap-1 items-center">
+                                <button onClick={() => { setEditEntry({ id: entry.id, type: "expense", amount: String(entry.amount), category: entry.category, description: entry.description ?? "", date: entry.date }); editForm.reset({ amount: String(entry.amount), category: entry.category, description: entry.description ?? "", date: entry.date }); }} className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => setDeleteId(entry.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </td>
                             </tr>
                           ))
                         }

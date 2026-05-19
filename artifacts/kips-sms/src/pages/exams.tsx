@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   useListExams, useCreateExam, useListClasses, useListStudents, getListExamsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,8 +16,9 @@ import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Loader2, FileText, Calendar, Trophy, Star, BookOpen,
-  Printer, ChevronRight, Award, TrendingUp, ClipboardList,
+  Printer, ChevronRight, Award, TrendingUp, ClipboardList, Trash2,
 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useAuthStore } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -565,6 +566,23 @@ export default function Exams() {
   const createMutation = useCreateExam();
   const { user }       = useAuthStore();
   const isStudent      = user?.role === "student";
+  const [deleteExamId, setDeleteExamId] = useState<number | null>(null);
+
+  const deleteExamMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/exams/${id}`, {
+        method: "DELETE",
+        headers: authHeader() as HeadersInit,
+      });
+      if (!res.ok) throw new Error("Failed");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListExamsQueryKey() });
+      toast({ title: "Exam deleted" });
+      setDeleteExamId(null);
+    },
+    onError: () => toast({ variant: "destructive", title: "Failed to delete exam" }),
+  });
 
   const form = useForm<z.infer<typeof examSchema>>({
     resolver: zodResolver(examSchema),
@@ -755,9 +773,20 @@ export default function Exams() {
                         <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradientForSubject(exam.subject)} flex items-center justify-center shadow-sm`}>
                           <FileText className="w-5 h-5 text-white" />
                         </div>
-                        <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
-                          {exam.className ?? "—"}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+                            {exam.className ?? "—"}
+                          </span>
+                          {!isStudent && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setDeleteExamId(exam.id); }}
+                              className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                              title="Delete exam"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <h3 className="font-bold text-gray-900 leading-tight">{exam.name}</h3>
                       <p className="text-sm font-medium text-violet-600 mt-0.5">{exam.subject}</p>
@@ -833,6 +862,22 @@ export default function Exams() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Delete Exam Confirmation ──────────────────────────────────────── */}
+      <AlertDialog open={deleteExamId !== null} onOpenChange={v => { if (!v) setDeleteExamId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this exam?</AlertDialogTitle>
+            <AlertDialogDescription>All results for this exam will also be deleted. This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => deleteExamId !== null && deleteExamMutation.mutate(deleteExamId)} disabled={deleteExamMutation.isPending}>
+              {deleteExamMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

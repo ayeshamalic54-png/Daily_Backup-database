@@ -4,7 +4,7 @@ import {
   useListCertificates, useCreateCertificate,
   useListStudents, getListCertificatesQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -16,7 +16,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, Award, Printer, X } from "lucide-react";
+import { Plus, Loader2, Award, Printer, X, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 // @page margin:0 removes browser URL / date headers & footers
 const PRINT_STYLES = `
@@ -161,16 +162,35 @@ function printSingleCertificate(cert: Cert) {
   w.print();
 }
 
+function certApiToken() { return localStorage.getItem("kips_token") ?? ""; }
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Certificates() {
-  const [open, setOpen]               = useState(false);
-  const [previewCert, setPreviewCert] = useState<Cert | null>(null);
+  const [open, setOpen]                   = useState(false);
+  const [previewCert, setPreviewCert]     = useState<Cert | null>(null);
+  const [deleteCertId, setDeleteCertId]   = useState<number | null>(null);
   const { toast }      = useToast();
   const queryClient    = useQueryClient();
 
   const { data: certificates, isLoading } = useListCertificates({});
   const { data: students }   = useListStudents({});
   const createMutation       = useCreateCertificate();
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/certificates/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${certApiToken()}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListCertificatesQueryKey() });
+      toast({ title: "Certificate deleted" });
+      setDeleteCertId(null);
+    },
+    onError: () => toast({ variant: "destructive", title: "Failed to delete certificate" }),
+  });
 
   useEffect(() => {
     const existing = document.getElementById("kips-print-styles");
@@ -432,13 +452,22 @@ export default function Certificates() {
                       <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${ct.color} flex items-center justify-center shadow-sm`}>
                         <Award className="w-5 h-5 text-white" />
                       </div>
-                      <Button
-                        size="icon" variant="ghost" className="h-7 w-7"
-                        onClick={e => { e.stopPropagation(); printSingleCertificate(cert as unknown as Cert); }}
-                        data-testid={`button-print-cert-${cert.id}`}
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon" variant="ghost" className="h-7 w-7"
+                          onClick={e => { e.stopPropagation(); printSingleCertificate(cert as unknown as Cert); }}
+                          data-testid={`button-print-cert-${cert.id}`}
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:bg-red-50 hover:text-red-700"
+                          onClick={e => { e.stopPropagation(); setDeleteCertId(cert.id); }}
+                          data-testid={`button-delete-cert-${cert.id}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
                     <h3 className="font-bold text-gray-900 text-sm">{ct.label}</h3>
                     <p className="text-gray-600 text-sm mt-1">{cert.studentName || "—"}</p>
@@ -453,6 +482,22 @@ export default function Certificates() {
           </div>
         )}
       </div>
+
+      {/* ── Delete Confirmation ─────────────────────────────────────────────── */}
+      <AlertDialog open={deleteCertId !== null} onOpenChange={v => { if (!v) setDeleteCertId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this certificate?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => deleteCertId !== null && deleteMutation.mutate(deleteCertId)} disabled={deleteMutation.isPending}>
+              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

@@ -4,7 +4,7 @@
                   useListAttendance, useMarkAttendance, useListStudents, useListStaff, useListClasses,
                   getListAttendanceQueryKey,
                 } from "@workspace/api-client-react";
-                import { useQueryClient } from "@tanstack/react-query";
+                import { useQueryClient, useMutation } from "@tanstack/react-query";
                 import { Button } from "@/components/ui/button";
                 import { Input } from "@/components/ui/input";
                 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +18,7 @@
                 import { useToast } from "@/hooks/use-toast";
                 import {
                   Plus, Loader2, Printer, CheckCircle, XCircle, Clock, Umbrella,
-                  Users, TrendingDown, RefreshCw, ClipboardCheck,
+                  Users, TrendingDown, RefreshCw, ClipboardCheck, Trash2,
                 } from "lucide-react";
                 import { motion } from "framer-motion";
 
@@ -514,6 +514,21 @@
                   const { data: staff }      = useListStaff();
                   const markMutation         = useMarkAttendance();
 
+                  const deleteAttendance = useMutation({
+                    mutationFn: async (id: number) => {
+                      const res = await fetch(`/api/attendance/${id}`, {
+                        method: "DELETE",
+                        headers: authHeader(),
+                      });
+                      if (!res.ok) throw new Error("Failed");
+                    },
+                    onSuccess: () => {
+                      queryClient.invalidateQueries({ queryKey: getListAttendanceQueryKey() });
+                      toast({ title: "Record deleted" });
+                    },
+                    onError: () => toast({ variant: "destructive", title: "Failed to delete" }),
+                  });
+
                   const form = useForm<z.infer<typeof schema>>({
                     resolver: zodResolver(schema),
                     defaultValues: { type: "student", date: new Date().toISOString().split("T")[0], status: "present" },
@@ -828,7 +843,7 @@
                                     <table className="w-full text-sm">
                                       <thead className="bg-gray-50">
                                         <tr>
-                                          {["#", "Name", "Class / Role", "Date", "Type", "Status"].map(h => (
+                                          {["#", "Name", "Class / Role", "Date", "Type", "Status", ""].map(h => (
                                             <th key={h} className="text-left py-3 px-3 font-semibold text-gray-600">{h}</th>
                                           ))}
                                         </tr>
@@ -854,6 +869,16 @@
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${sc}`}>
                                       {att.status}
                                     </span>
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <button
+                                      onClick={() => deleteAttendance.mutate(att.id)}
+                                      disabled={deleteAttendance.isPending}
+                                      className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors"
+                                      title="Delete record"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                   </td>
                                 </tr>
                               );

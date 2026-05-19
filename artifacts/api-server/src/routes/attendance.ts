@@ -184,4 +184,38 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/attendance/:id
+router.put("/:id", requireAuth, async (req, res) => {
+  try {
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role === "student") { res.status(403).json({ error: "Forbidden" }); return; }
+    const id = Number(req.params.id);
+    const [att] = await db
+      .update(attendanceTable)
+      .set({ status: req.body.status })
+      .where(eq(attendanceTable.id, id))
+      .returning();
+    if (!att) { res.status(404).json({ error: "Not found" }); return; }
+    const enriched = await enrichAttendance(att as unknown as Record<string, unknown>);
+    res.json(enriched);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /api/attendance/:id
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role === "student") { res.status(403).json({ error: "Forbidden" }); return; }
+    const id = Number(req.params.id);
+    await db.delete(attendanceTable).where(eq(attendanceTable.id, id));
+    res.status(204).end();
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
