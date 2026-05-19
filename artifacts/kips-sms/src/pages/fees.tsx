@@ -618,6 +618,7 @@ export default function Fees() {
   // Fee structure auto-fill
   const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>("");
+  const [studentSearch, setStudentSearch]     = useState<string>("");
 
   const { toast }   = useToast();
   const queryClient = useQueryClient();
@@ -884,7 +885,7 @@ export default function Fees() {
               ))}
             </div>
             {!isStudent && (
-              <Dialog open={addOpen} onOpenChange={o => { setAddOpen(o); if (!o) { addForm.reset({ fine: "0" }); setSelectedClassId(""); } }}>
+              <Dialog open={addOpen} onOpenChange={o => { setAddOpen(o); if (!o) { addForm.reset({ fine: "0" }); setSelectedClassId(""); setStudentSearch(""); } }}>
                 <DialogTrigger asChild>
                   <Button className="bg-gradient-to-r from-emerald-600 to-green-600 text-white">
                     <Plus className="w-4 h-4 mr-2" /> Add Fee Record
@@ -925,9 +926,9 @@ export default function Fees() {
                         </Select>
                       </div>
 
-                      {/* Step 2: Student selector — filtered by class */}
+                      {/* Step 2: Student selector — filtered by class, with search by admission# or name */}
                       <FormField control={addForm.control} name="studentId" render={({ field }) => {
-                        const studentsInClass = selectedClassId
+                        const allInClass = selectedClassId
                           ? (students ?? [])
                               .filter(s => Number(s.classId) === Number(selectedClassId))
                               .slice()
@@ -935,29 +936,64 @@ export default function Fees() {
                                 (a.admissionNumber ?? "").localeCompare(b.admissionNumber ?? "", undefined, { numeric: true })
                               )
                           : [];
+                        const q = studentSearch.trim().toLowerCase();
+                        const studentsInClass = q
+                          ? allInClass.filter(s =>
+                              (s.admissionNumber ?? "").toLowerCase().includes(q) ||
+                              (s.name ?? "").toLowerCase().includes(q)
+                            )
+                          : allInClass;
+                        const selectedStudent = allInClass.find(s => String(s.id) === field.value);
                         return (
                           <FormItem>
-                            <FormLabel>Student * <span className="text-xs text-gray-500 font-normal">{selectedClassId ? `(${studentsInClass.length} students)` : "(select class first)"}</span></FormLabel>
-                            <Select
-                              value={field.value}
-                              onValueChange={val => handleStudentChange(val, field.onChange)}
+                            <FormLabel>
+                              Student * <span className="text-xs text-gray-500 font-normal">
+                                {selectedClassId
+                                  ? (q ? `(${studentsInClass.length} of ${allInClass.length} matching)` : `(${allInClass.length} students)`)
+                                  : "(select class first)"}
+                              </span>
+                            </FormLabel>
+                            {/* Search input — type admission # or name */}
+                            <Input
+                              placeholder={selectedClassId ? "Search by admission # or name..." : "Choose a class above first"}
+                              value={studentSearch}
+                              onChange={e => setStudentSearch(e.target.value)}
                               disabled={!selectedClassId}
-                            >
-                              <FormControl>
-                                <SelectTrigger><SelectValue placeholder={selectedClassId ? "Select student" : "Choose a class above first"} /></SelectTrigger>
-                              </FormControl>
-                              <SelectContent className="max-h-72 overflow-y-auto">
+                              className="mb-2"
+                            />
+                            {/* Live results list */}
+                            {selectedClassId && (
+                              <div className="border rounded-md max-h-56 overflow-y-auto bg-white">
                                 {studentsInClass.length === 0 ? (
-                                  <div className="px-3 py-4 text-sm text-gray-500 text-center">No students in this class</div>
+                                  <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                                    {q ? "No students match your search" : "No students in this class"}
+                                  </div>
                                 ) : (
-                                  studentsInClass.map(s => (
-                                    <SelectItem key={s.id} value={String(s.id)}>
-                                      {s.admissionNumber} — {s.name}
-                                    </SelectItem>
-                                  ))
+                                  studentsInClass.map(s => {
+                                    const isSelected = String(s.id) === field.value;
+                                    return (
+                                      <button
+                                        key={s.id}
+                                        type="button"
+                                        onClick={() => { handleStudentChange(String(s.id), field.onChange); setStudentSearch(""); }}
+                                        className={`w-full text-left px-3 py-2 text-sm border-b last:border-b-0 transition-colors ${
+                                          isSelected ? "bg-emerald-50 text-emerald-800 font-medium" : "hover:bg-gray-50"
+                                        }`}
+                                      >
+                                        <span className="font-mono text-xs text-purple-600 mr-2">{s.admissionNumber}</span>
+                                        {s.name}
+                                        {isSelected && <span className="ml-2 text-emerald-600">✓</span>}
+                                      </button>
+                                    );
+                                  })
                                 )}
-                              </SelectContent>
-                            </Select>
+                              </div>
+                            )}
+                            {selectedStudent && (
+                              <p className="text-xs text-emerald-700 mt-1">
+                                ✓ Selected: <strong>{selectedStudent.admissionNumber}</strong> — {selectedStudent.name}
+                              </p>
+                            )}
                             <FormMessage />
                           </FormItem>
                         );

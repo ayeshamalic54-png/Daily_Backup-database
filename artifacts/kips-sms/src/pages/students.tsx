@@ -478,43 +478,71 @@ export default function Students() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b">
-                      {["Adm #","Name","Father Name","Class","Section","Fee/mo","Status","Actions"].map(h => (
+                      {["#","Adm #","Name","Father Name","Section","Fee/mo","Status","Actions"].map(h => (
                         <th key={h} className="text-left py-3 px-2 font-semibold text-gray-600">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map(student => {
-                      const status = statusConfig[student.status as keyof typeof statusConfig] ?? statusConfig.active;
-                      return (
-                        <tr key={student.id} className="border-b hover:bg-gray-50 transition-colors" data-testid={`row-student-${student.id}`}>
-                          <td className="py-3 px-2 font-mono text-xs text-purple-600 font-medium">{student.admissionNumber}</td>
-                          <td className="py-3 px-2 font-medium text-gray-900">{student.name}</td>
-                          <td className="py-3 px-2 text-gray-600">{student.fatherName || "—"}</td>
-                          <td className="py-3 px-2 text-gray-600">{student.className || "—"}</td>
-                          <td className="py-3 px-2 text-gray-600">{student.section || "—"}</td>
-                          <td className="py-3 px-2 text-gray-600">{student.feeAmount ? `PKR ${Number(student.feeAmount).toLocaleString()}` : "—"}</td>
-                          <td className="py-3 px-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${status.className}`}>
-                              {status.label}
-                            </span>
-                          </td>
-                          <td className="py-3 px-2">
-                            <div className="flex items-center gap-1">
-                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setLocation(`/students/${student.id}`)} data-testid={`button-view-student-${student.id}`}>
-                                <Eye className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button size="icon" variant="ghost" className="h-7 w-7 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50" onClick={() => handleEdit(student)} data-testid={`button-edit-student-${student.id}`}>
-                                <Pencil className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(student.id, student.name)} disabled={deleteMutation.isPending} data-testid={`button-delete-student-${student.id}`}>
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {(() => {
+                      // Group students by class, preserving sorted order
+                      const groups: { className: string; items: typeof students }[] = [];
+                      const groupMap = new Map<string, typeof students>();
+                      for (const s of students) {
+                        const key = s.className || "Unassigned";
+                        if (!groupMap.has(key)) {
+                          const arr: typeof students = [];
+                          groupMap.set(key, arr);
+                          groups.push({ className: key, items: arr });
+                        }
+                        groupMap.get(key)!.push(s);
+                      }
+                      const rows: JSX.Element[] = [];
+                      groups.forEach(group => {
+                        rows.push(
+                          <tr key={`hdr-${group.className}`} className="bg-gradient-to-r from-purple-50 to-indigo-50 border-b">
+                            <td colSpan={8} className="py-2 px-3 font-semibold text-purple-800 text-sm">
+                              {group.className}
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-purple-600 text-white font-medium">
+                                {group.items.length} {group.items.length === 1 ? "student" : "students"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                        group.items.forEach((student, idx) => {
+                          const status = statusConfig[student.status as keyof typeof statusConfig] ?? statusConfig.active;
+                          rows.push(
+                            <tr key={student.id} className="border-b hover:bg-gray-50 transition-colors" data-testid={`row-student-${student.id}`}>
+                              <td className="py-3 px-2 text-gray-500 font-medium w-10">{idx + 1}</td>
+                              <td className="py-3 px-2 font-mono text-xs text-purple-600 font-medium">{student.admissionNumber}</td>
+                              <td className="py-3 px-2 font-medium text-gray-900">{student.name}</td>
+                              <td className="py-3 px-2 text-gray-600">{student.fatherName || "—"}</td>
+                              <td className="py-3 px-2 text-gray-600">{student.section || "—"}</td>
+                              <td className="py-3 px-2 text-gray-600">{student.feeAmount ? `PKR ${Number(student.feeAmount).toLocaleString()}` : "—"}</td>
+                              <td className="py-3 px-2">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${status.className}`}>
+                                  {status.label}
+                                </span>
+                              </td>
+                              <td className="py-3 px-2">
+                                <div className="flex items-center gap-1">
+                                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setLocation(`/students/${student.id}`)} data-testid={`button-view-student-${student.id}`}>
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50" onClick={() => handleEdit(student)} data-testid={`button-edit-student-${student.id}`}>
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(student.id, student.name)} disabled={deleteMutation.isPending} data-testid={`button-delete-student-${student.id}`}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      });
+                      return rows;
+                    })()}
                   </tbody>
                 </table>
               </div>
