@@ -805,8 +805,16 @@ export default function Fees() {
         imgW = imgH / ratio;
       }
       pdf.addImage(imgData, "JPEG", (pdfW - imgW) / 2, margin, imgW, imgH);
-      const fileName = `receipt_${receipt.studentName.replace(/\s+/g, "_")}_${receipt.month.replace(/\s+/g, "_")}.pdf`;
-      pdf.save(fileName);
+      // Open the PDF in a new browser tab. The native PDF viewer already
+      // exposes Save and Print buttons, so a single click gives the user
+      // everything they need.
+      const blobUrl = pdf.output("bloburl");
+      const win = window.open(blobUrl as unknown as string, "_blank");
+      if (!win) {
+        // Popup blocked — fall back to direct download
+        const fileName = `receipt_${receipt.studentName.replace(/\s+/g, "_")}_${receipt.month.replace(/\s+/g, "_")}.pdf`;
+        pdf.save(fileName);
+      }
     } catch (err) {
       console.error("PDF generation failed", err);
       toast({ variant: "destructive", title: "PDF download failed", description: "Please try again." });
