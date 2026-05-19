@@ -185,6 +185,170 @@ export default function FeeVoucher() {
     } finally { setDeleting(false); }
   };
 
+  // ── Print all vouchers ────────────────────────────────────────────────────
+  // Builds a self-contained HTML page (hex colors only — no Tailwind/oklch) and
+  // opens it in a new tab where the browser's native print dialog auto-opens.
+  // The user can then save as PDF or print directly.
+  const handlePrintVouchers = () => {
+    if (classStudents.length === 0) return;
+    const logoSrc = `${window.location.origin}/kips-logo.jpeg`;
+
+    // Escape any user/data text before injecting into the HTML template so a
+    // malicious student/class name cannot inject script tags.
+    const esc = (v: unknown) => String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+    const vouchersHtml = classStudents.map((student, idx) => {
+      const feeRows: { label: string; amount: number }[] = [];
+      if (hasFeeStructure && selectedFeeTypes.size > 0) {
+        ALL_FEE_TYPES.forEach(ft => {
+          if (selectedFeeTypes.has(ft.key) && (classFees[ft.key] ?? 0) > 0)
+            feeRows.push({ label: ft.label, amount: classFees[ft.key]! });
+        });
+      } else {
+        feeRows.push({ label: "Monthly Tuition Fee", amount: Number(student.feeAmount ?? 0) });
+      }
+      const total = feeRows.reduce((s, r) => s + r.amount, 0);
+      const voucherNo = `${month.replace("-", "")}-${String(student.admissionNumber).split("-").pop()}-${String(idx + 1).padStart(3, "0")}`;
+
+      const rowsHtml = feeRows.map((row, i) => `
+        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${esc(row.label)}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600;">${row.amount.toLocaleString()}</td>
+        </tr>`).join("");
+
+      return `
+        <div class="voucher">
+          <div class="v-header">
+            <div class="v-brand">
+              <img src="${esc(logoSrc)}" alt="KIPS" class="v-logo" crossorigin="anonymous" />
+              <div>
+                <h2 class="v-title">KIPS School Hassari</h2>
+                <p class="v-sub">Bright Future | School Fee Voucher</p>
+                <p class="v-date">Date: ${esc(voucherDate)}</p>
+              </div>
+            </div>
+            <div class="v-no">
+              <p class="v-no-label">Voucher No.</p>
+              <p class="v-no-val">${esc(voucherNo)}</p>
+            </div>
+          </div>
+
+          <div class="v-info">
+            <div>
+              <div class="v-row"><span class="v-key">Student Name:</span><span class="v-val v-strong">${esc(student.name)}</span></div>
+              <div class="v-row"><span class="v-key">Admission No.:</span><span class="v-val v-mono">${esc(student.admissionNumber)}</span></div>
+              <div class="v-row"><span class="v-key">Father Name:</span><span class="v-val">${esc(student.fatherName ?? "—")}</span></div>
+            </div>
+            <div>
+              <div class="v-row"><span class="v-key">Class:</span><span class="v-val v-strong">${esc(selectedClassName)}</span></div>
+              <div class="v-row"><span class="v-key">Section:</span><span class="v-val">${esc(student.section ?? "—")}</span></div>
+              <div class="v-row"><span class="v-key">Month:</span><span class="v-val v-strong">${esc(monthLabel)}</span></div>
+            </div>
+          </div>
+
+          <table class="v-table">
+            <thead>
+              <tr><th style="text-align:left;">Description</th><th style="text-align:right;">Amount (PKR)</th></tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+              <tr style="background:#f0f4ff;">
+                <td style="padding:10px 12px;font-weight:700;color:${NAVY};">Total Due</td>
+                <td style="padding:10px 12px;text-align:right;font-weight:700;color:#dc2626;font-size:15px;">${total.toLocaleString()}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="v-footer">
+            <span>Due Date: <strong>${esc(dueDate)}</strong></span>
+            <span>Pay before due date to avoid fine</span>
+            <span>Cashier Signature: ________________</span>
+          </div>
+        </div>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Fee Vouchers — ${esc(selectedClassName)} — ${esc(monthLabel)}</title>
+<style>
+  @page { size: A4; margin: 10mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #f3f4f6; color: #111827; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+  .wrap { max-width: 800px; margin: 0 auto; padding: 16px; }
+  .voucher { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; margin-bottom: 20px; page-break-inside: avoid; }
+  .v-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #e5e7eb; padding-bottom: 14px; margin-bottom: 14px; }
+  .v-brand { display: flex; align-items: center; gap: 12px; }
+  .v-logo { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid #e07b1a; }
+  .v-title { margin: 0; font-size: 18px; font-weight: 700; color: ${NAVY}; }
+  .v-sub { margin: 2px 0 0; font-size: 11px; color: #6b7280; }
+  .v-date { margin: 2px 0 0; font-size: 11px; color: #9ca3af; }
+  .v-no { text-align: right; }
+  .v-no-label { margin: 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }
+  .v-no-val { margin: 2px 0 0; font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: #1f2937; }
+  .v-info { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .v-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+  .v-key { color: #6b7280; width: 112px; flex-shrink: 0; }
+  .v-val { color: #1f2937; }
+  .v-strong { font-weight: 600; color: #111827; }
+  .v-mono { font-family: ui-monospace, Menlo, monospace; color: #7e22ce; font-weight: 500; }
+  .v-table { width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 14px; font-size: 13px; }
+  .v-table thead { background: ${NAVY}; color: #ffffff; }
+  .v-table th { padding: 8px 12px; }
+  .v-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e5e7eb; padding-top: 10px; font-size: 11px; color: #6b7280; }
+  .v-footer strong { color: #374151; }
+  .toolbar { position: sticky; top: 0; background: ${NAVY}; color: #fff; padding: 10px 16px; display: flex; gap: 10px; justify-content: flex-end; align-items: center; z-index: 100; }
+  .toolbar button { background: #fff; color: ${NAVY}; border: 0; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .toolbar button:hover { background: #f0f4ff; }
+  @media print {
+    .toolbar { display: none; }
+    body { background: #fff; }
+    .wrap { padding: 0; max-width: none; }
+    .voucher { border: 0; border-radius: 0; border-bottom: 1px dashed #d1d5db; margin-bottom: 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <span style="margin-right:auto;font-weight:600;">${classStudents.length} Vouchers — ${esc(selectedClassName)} — ${esc(monthLabel)}</span>
+    <button onclick="window.print()">Print / Save as PDF</button>
+    <button onclick="window.close()">Close</button>
+  </div>
+  <div class="wrap">${vouchersHtml}</div>
+  <script>
+    window.addEventListener("load", function () {
+      // Wait for all images, then auto-open print dialog
+      var imgs = Array.from(document.images);
+      var pending = imgs.filter(function (i) { return !i.complete; });
+      if (pending.length === 0) { setTimeout(function () { window.print(); }, 300); return; }
+      var done = 0;
+      pending.forEach(function (img) {
+        var fin = function () { if (++done === pending.length) setTimeout(function () { window.print(); }, 300); };
+        img.addEventListener("load", fin);
+        img.addEventListener("error", fin);
+      });
+      setTimeout(function () { window.print(); }, 2500); // safety timeout
+    });
+  </script>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) {
+      alert("Popup blocked — please allow popups for this site to print vouchers.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -270,7 +434,7 @@ export default function FeeVoucher() {
             </Button>
 
             {showVouchers && classStudents.length > 0 && (
-              <Button variant="outline" onClick={() => window.print()}>
+              <Button variant="outline" onClick={handlePrintVouchers}>
                 <Printer className="w-4 h-4 mr-2" /> Print All Vouchers
               </Button>
             )}
