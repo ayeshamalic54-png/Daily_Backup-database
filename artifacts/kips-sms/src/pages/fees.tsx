@@ -720,6 +720,10 @@ export default function Fees() {
     payMutation.mutate({ id: payOpen, data: { paidAmount: paid, discount: disc } as never }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListFeesQueryKey(), refetchType: "all" });
+        // Also refresh dashboard and accounts so the new payment shows up there
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"], refetchType: "all" });
+        queryClient.invalidateQueries({ queryKey: ["/api/accounts/income"], refetchType: "all" });
+        queryClient.invalidateQueries({ queryKey: ["/api/accounts/summary"], refetchType: "all" });
         const fine = Number((currentFee as unknown as Record<string, unknown>).fine ?? 0);
         const effectiveTotal = currentFee.amount + fine - disc;
         const totalPaid = (currentFee.paidAmount ?? 0) + paid;
@@ -1068,6 +1072,33 @@ export default function Fees() {
                                     className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2"
                                     onClick={() => { setPayOpen(fee.id); setPayAmount(String(fee.remainingAmount ?? 0)); }}
                                   >Pay</Button>
+                                )}
+                                {fee.status === "paid" && (
+                                  <Button size="sm" variant="outline"
+                                    className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 px-2"
+                                    title="Reprint receipt"
+                                    onClick={() => {
+                                      const fineN = Number((fee as unknown as Record<string, unknown>).fine ?? 0);
+                                      const discN = Number((fee as unknown as Record<string, unknown>).discount ?? 0);
+                                      const effTotal = fee.amount + fineN - discN;
+                                      const totalPaid = fee.paidAmount ?? 0;
+                                      setReceipt({
+                                        receiptNo:       `RCP-${fee.id}`,
+                                        studentName:     fee.studentName ?? "—",
+                                        admissionNumber: (fee as unknown as Record<string, unknown>).admissionNumber as string ?? "—",
+                                        className:       fee.className ?? "—",
+                                        month:           fee.month,
+                                        amountPaid:      totalPaid,
+                                        remaining:       Math.max(0, effTotal - totalPaid),
+                                        newStatus:       "paid",
+                                        paidDate:        fee.paidDate
+                                          ? new Date(fee.paidDate).toLocaleDateString("en-PK", { dateStyle: "long" })
+                                          : new Date().toLocaleDateString("en-PK", { dateStyle: "long" }),
+                                      });
+                                    }}
+                                  >
+                                    <Printer className="w-3.5 h-3.5 mr-1" /> Slip
+                                  </Button>
                                 )}
                                 {isAdmin && (
                                   <Button size="sm" variant="outline"
