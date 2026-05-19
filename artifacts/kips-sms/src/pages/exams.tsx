@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { useListExams, useCreateExam, useListClasses, useListStudents, getListExamsQueryKey } from "@workspace/api-client-react";
+import {
+  useListExams, useCreateExam, useListClasses, useListStudents, getListExamsQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,30 +14,35 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, FileText, Calendar, Trophy, Star, BookOpen, Printer, ChevronRight, Award, TrendingUp } from "lucide-react";
+import {
+  Plus, Loader2, FileText, Calendar, Trophy, Star, BookOpen,
+  Printer, ChevronRight, Award, TrendingUp, ClipboardList,
+} from "lucide-react";
 import { useAuthStore } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 
-function authHeader() {
+function authHeader(): Record<string, string> {
   const token = localStorage.getItem("kips_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// ─── Schemas ──────────────────────────────────────────────────────────────────
 const examSchema = z.object({
-  name: z.string().min(1, "Name required"),
-  classId: z.string().min(1, "Class required"),
-  subject: z.string().min(1, "Subject required"),
-  examDate: z.string().min(1, "Date required"),
-  totalMarks: z.string().min(1, "Total marks required"),
+  name:         z.string().min(1, "Name required"),
+  classId:      z.string().min(1, "Class required"),
+  subject:      z.string().min(1, "Subject required"),
+  examDate:     z.string().min(1, "Date required"),
+  totalMarks:   z.string().min(1, "Total marks required"),
   passingMarks: z.string().optional(),
 });
 
 const resultSchema = z.object({
-  studentId: z.string().min(1, "Student required"),
+  studentId:     z.string().min(1, "Student required"),
   marksObtained: z.string().min(1, "Marks required"),
-  remarks: z.string().optional(),
+  remarks:       z.string().optional(),
 });
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 type ExamResult = {
   id: number;
   examId: number;
@@ -47,6 +54,18 @@ type ExamResult = {
   remarks: string | null;
 };
 
+type ExamInfo = {
+  id: number;
+  name: string;
+  subject: string;
+  totalMarks: number;
+  passingMarks: number;
+  examDate: string;
+  className?: string | null;
+  classId: number;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function gradeColor(grade: string) {
   if (grade === "A+" || grade === "A") return "text-emerald-700 bg-emerald-100 border-emerald-300";
   if (grade === "B") return "text-blue-700 bg-blue-100 border-blue-300";
@@ -55,7 +74,7 @@ function gradeColor(grade: string) {
   return "text-red-700 bg-red-100 border-red-300";
 }
 
-function calcGrade(marks: number, total: number) {
+function calcGrade(marks: number, total: number): string {
   const pct = (marks / total) * 100;
   if (pct >= 90) return "A+";
   if (pct >= 80) return "A";
@@ -65,20 +84,31 @@ function calcGrade(marks: number, total: number) {
   return "F";
 }
 
-// ─── Student Result Card (what a student sees) ───────────────────────────────
-function StudentResultView({ result, exam }: {
-  result: ExamResult;
-  exam: { name: string; subject: string; totalMarks: number; passingMarks: number; examDate: string; className?: string | null };
-}) {
-  const pct = Math.round((result.marksObtained / exam.totalMarks) * 100);
+function gradientForSubject(subject: string) {
+  const s = subject.toLowerCase();
+  if (s.includes("math"))                        return "from-blue-500 to-cyan-500";
+  if (s.includes("eng"))                         return "from-violet-500 to-fuchsia-500";
+  if (s.includes("urdu"))                        return "from-emerald-500 to-teal-500";
+  if (s.includes("science") || s.includes("bio")) return "from-green-500 to-lime-500";
+  if (s.includes("phys"))                        return "from-orange-500 to-amber-500";
+  if (s.includes("chem"))                        return "from-pink-500 to-rose-500";
+  if (s.includes("hist") || s.includes("geo"))   return "from-amber-400 to-yellow-500";
+  if (s.includes("islam"))                       return "from-teal-500 to-cyan-500";
+  return "from-violet-500 to-fuchsia-500";
+}
+
+// ─── Student Result Card ──────────────────────────────────────────────────────
+function StudentResultView({ result, exam }: { result: ExamResult; exam: ExamInfo }) {
+  const pct    = Math.round((result.marksObtained / exam.totalMarks) * 100);
   const passed = result.marksObtained >= exam.passingMarks;
 
   return (
     <div className="space-y-5">
-      {/* Result card */}
-      <div className={`rounded-2xl p-6 text-center ${passed
-        ? "bg-gradient-to-br from-emerald-500 to-green-600"
-        : "bg-gradient-to-br from-red-500 to-rose-600"}`}>
+      <div className={`rounded-2xl p-6 text-center ${
+        passed
+          ? "bg-gradient-to-br from-emerald-500 to-green-600"
+          : "bg-gradient-to-br from-red-500 to-rose-600"
+      }`}>
         <div className="flex justify-center mb-3">
           {passed
             ? <Award className="w-12 h-12 text-white/90" />
@@ -96,13 +126,12 @@ function StudentResultView({ result, exam }: {
         </p>
       </div>
 
-      {/* Details grid */}
       <div className="grid grid-cols-2 gap-3">
         {[
-          { label: "Exam", value: exam.name },
-          { label: "Class", value: exam.className ?? "—" },
-          { label: "Date", value: exam.examDate },
-          { label: "Passing Marks", value: exam.passingMarks },
+          { label: "Exam",          value: exam.name              },
+          { label: "Class",         value: exam.className ?? "—"  },
+          { label: "Date",          value: exam.examDate           },
+          { label: "Passing Marks", value: String(exam.passingMarks) },
           ...(result.position ? [{ label: "Position", value: `#${result.position}` }] : []),
         ].map(item => (
           <div key={item.label} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
@@ -122,18 +151,160 @@ function StudentResultView({ result, exam }: {
   );
 }
 
-// ─── Admin Results Table ──────────────────────────────────────────────────────
-function AdminResultsView({ examId, exam, students, onAdded }: {
-  examId: number;
-  exam: { totalMarks: number; passingMarks: number; classId: number };
-  students: Array<{ id: number; name: string; className?: string | null }>;
-  onAdded: () => void;
+// ─── TASK 9: Bulk Result Entry ────────────────────────────────────────────────
+type BulkEntry = {
+  studentId:   number;
+  studentName: string;
+  marks:       string;
+  remarks:     string;
+};
+
+function BulkResultEntry({ exam, students, onSaved }: {
+  exam:     ExamInfo;
+  students: Array<{ id: number; name: string; classId?: number | null }>;
+  onSaved:  () => void;
 }) {
   const { toast } = useToast();
-  const [results, setResults] = useState<ExamResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [addOpen, setAddOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const classStudents = students.filter(s => s.classId === exam.classId);
+
+  const [entries, setEntries] = useState<BulkEntry[]>(
+    classStudents.map(s => ({ studentId: s.id, studentName: s.name, marks: "", remarks: "" }))
+  );
+
+  const setMarks   = (id: number, marks: string)   =>
+    setEntries(prev => prev.map(e => e.studentId === id ? { ...e, marks   } : e));
+  const setRemarks = (id: number, remarks: string) =>
+    setEntries(prev => prev.map(e => e.studentId === id ? { ...e, remarks } : e));
+
+  const handleSave = async () => {
+    const toSave = entries.filter(e => e.marks.trim() !== "" && !isNaN(Number(e.marks)));
+    if (!toSave.length) {
+      toast({ variant: "destructive", title: "Kisi ka bhi marks enter nahi kiya" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/exams/${exam.id}/results/bulk`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", ...authHeader() },
+        body:    JSON.stringify({
+          entries: toSave.map(e => ({
+            studentId:     e.studentId,
+            marksObtained: Number(e.marks),
+            remarks:       e.remarks || null,
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json() as { saved: number };
+      toast({ title: `✓ ${data.saved} students ke results save ho gaye` });
+      onSaved();
+    } catch {
+      toast({ variant: "destructive", title: "Bulk results save karne mein masla hua" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filled = entries.filter(e => e.marks.trim() !== "").length;
+
+  if (classStudents.length === 0) {
+    return (
+      <div className="py-10 text-center text-gray-400">
+        <BookOpen className="w-10 h-10 mx-auto mb-3 opacity-30" />
+        <p className="text-sm">Is class mein koi student nahi mila</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">{filled} / {entries.length} students ke marks entered</p>
+        <Button
+          onClick={handleSave}
+          disabled={saving || filled === 0}
+          className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white"
+        >
+          {saving
+            ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Saving...</>
+            : <><ClipboardList className="w-4 h-4 mr-2" /> Save All ({filled})</>
+          }
+        </Button>
+      </div>
+
+      <div className="rounded-lg border overflow-auto max-h-[60vh]">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">#</th>
+              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">Student</th>
+              <th className="text-center py-2.5 px-3 font-semibold text-gray-600">Marks (/{exam.totalMarks})</th>
+              <th className="text-center py-2.5 px-3 font-semibold text-gray-600">Grade</th>
+              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">Remarks (optional)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry, i) => {
+              const marksNum = Number(entry.marks);
+              const grade    = entry.marks && !isNaN(marksNum) ? calcGrade(marksNum, exam.totalMarks) : null;
+              return (
+                <tr key={entry.studentId} className="border-t hover:bg-gray-50">
+                  <td className="py-2 px-3 text-gray-400 text-xs">{i + 1}</td>
+                  <td className="py-2 px-3 font-medium text-gray-900">{entry.studentName}</td>
+                  <td className="py-2 px-3">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={exam.totalMarks}
+                      placeholder={`0–${exam.totalMarks}`}
+                      value={entry.marks}
+                      onChange={e => setMarks(entry.studentId, e.target.value)}
+                      className="h-8 w-24 text-center mx-auto"
+                    />
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    {grade ? (
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${gradeColor(grade)}`}>
+                        {grade}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="py-2 px-3">
+                    <Input
+                      placeholder="Optional..."
+                      value={entry.remarks}
+                      onChange={e => setRemarks(entry.studentId, e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Admin Results View ───────────────────────────────────────────────────────
+function AdminResultsView({ examId, exam, students, onAdded }: {
+  examId:   number;
+  exam:     ExamInfo;
+  students: Array<{ id: number; name: string; classId?: number | null }>;
+  onAdded:  () => void;
+}) {
+  const { toast }  = useToast();
+  const [results,  setResults]  = useState<ExamResult[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [addOpen,  setAddOpen]  = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [saving,   setSaving]   = useState(false);
 
   const form = useForm<z.infer<typeof resultSchema>>({
     resolver: zodResolver(resultSchema),
@@ -149,21 +320,25 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
       .finally(() => setLoading(false));
   };
 
+  // fetch on mount
   useState(() => { fetchResults(); });
 
-  const classStudents = students.filter(s => {
-    // Show all students — teacher picks from list
-    return true;
-  });
+  // Students filtered to this exam's class
+  const classStudents = students.filter(s => s.classId === exam.classId);
 
   const onSubmit = (values: z.infer<typeof resultSchema>) => {
     const marks = Number(values.marksObtained);
     const grade = calcGrade(marks, exam.totalMarks);
     setSaving(true);
     fetch(`/api/exams/${examId}/results`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(authHeader() as Record<string, string>) },
-      body: JSON.stringify({ studentId: Number(values.studentId), marksObtained: marks, grade, remarks: values.remarks || null }),
+      method:  "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body:    JSON.stringify({
+        studentId:     Number(values.studentId),
+        marksObtained: marks,
+        grade,
+        remarks:       values.remarks || null,
+      }),
     })
       .then(r => r.json())
       .then(() => {
@@ -180,15 +355,16 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
   const deleteResult = (id: number) => {
     if (!confirm("Delete this result?")) return;
     fetch(`/api/exams/${examId}/results/${id}`, {
-      method: "DELETE",
-      headers: authHeader() as HeadersInit,
+      method: "DELETE", headers: authHeader() as HeadersInit,
     }).then(() => fetchResults());
   };
 
   const totalStudents = results.length;
-  const passed = results.filter(r => r.marksObtained >= exam.passingMarks).length;
+  const passed   = results.filter(r => r.marksObtained >= exam.passingMarks).length;
   const topScore = results.length ? Math.max(...results.map(r => r.marksObtained)) : 0;
-  const avg = results.length ? Math.round(results.reduce((s, r) => s + r.marksObtained, 0) / results.length) : 0;
+  const avg      = results.length
+    ? Math.round(results.reduce((s, r) => s + r.marksObtained, 0) / results.length)
+    : 0;
 
   return (
     <div className="space-y-4">
@@ -196,10 +372,10 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
       {results.length > 0 && (
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: "Total", value: totalStudents, gradient: "from-blue-500 to-cyan-500" },
-            { label: "Passed", value: passed, gradient: "from-emerald-500 to-green-500" },
-            { label: "Average", value: avg, gradient: "from-violet-500 to-purple-600" },
-            { label: "Top Score", value: topScore, gradient: "from-amber-400 to-orange-500" },
+            { label: "Total",     value: totalStudents, gradient: "from-blue-500 to-cyan-500"     },
+            { label: "Passed",    value: passed,        gradient: "from-emerald-500 to-green-500" },
+            { label: "Average",   value: avg,           gradient: "from-violet-500 to-purple-600" },
+            { label: "Top Score", value: topScore,      gradient: "from-amber-400 to-orange-500"  },
           ].map(c => (
             <Card key={c.label} className="overflow-hidden border-0 shadow-sm">
               <CardContent className="p-0">
@@ -213,15 +389,47 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
         </div>
       )}
 
-      {/* Add Result */}
+      {/* Action buttons */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">{results.length} results entered</p>
-        <Button size="sm" onClick={() => setAddOpen(true)} className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Add Result
-        </Button>
+        <div className="flex gap-2">
+          {/* TASK 9: Bulk entry button */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setBulkOpen(true)}
+            className="border-violet-300 text-violet-700 hover:bg-violet-50"
+          >
+            <ClipboardList className="w-3.5 h-3.5 mr-1" /> Bulk Entry
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" /> Add Single
+          </Button>
+        </div>
       </div>
 
-      {/* Add Result Dialog */}
+      {/* TASK 9: Bulk Entry Dialog */}
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-violet-600" />
+              Bulk Result Entry — {exam.name} ({exam.subject})
+            </DialogTitle>
+          </DialogHeader>
+          <BulkResultEntry
+            exam={exam}
+            students={students}
+            onSaved={() => { setBulkOpen(false); fetchResults(); onAdded(); }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Single Add Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add Student Result</DialogTitle></DialogHeader>
@@ -242,7 +450,9 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
               <FormField control={form.control} name="marksObtained" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Marks Obtained * (out of {exam.totalMarks})</FormLabel>
-                  <FormControl><Input type="number" min={0} max={exam.totalMarks} placeholder="e.g. 85" {...field} /></FormControl>
+                  <FormControl>
+                    <Input type="number" min={0} max={exam.totalMarks} placeholder="e.g. 85" {...field} />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -262,13 +472,13 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
         </DialogContent>
       </Dialog>
 
-      {/* Results table */}
+      {/* Results Table */}
       {loading ? (
-        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+        <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : results.length === 0 ? (
         <div className="py-12 text-center text-gray-400">
           <FileText className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No results yet. Add student results above.</p>
+          <p className="text-sm">No results yet. Use Bulk Entry or Add Single.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -282,14 +492,14 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
                 <th className="text-center py-2.5 px-3 font-semibold text-gray-600">Grade</th>
                 <th className="text-center py-2.5 px-3 font-semibold text-gray-600">Status</th>
                 <th className="text-left py-2.5 px-3 font-semibold text-gray-600">Remarks</th>
-                <th className="py-2.5 px-3"></th>
+                <th className="py-2.5 px-3" />
               </tr>
             </thead>
             <tbody>
               {[...results]
                 .sort((a, b) => b.marksObtained - a.marksObtained)
                 .map((r, i) => {
-                  const pct = Math.round((r.marksObtained / exam.totalMarks) * 100);
+                  const pct    = Math.round((r.marksObtained / exam.totalMarks) * 100);
                   const passed = r.marksObtained >= exam.passingMarks;
                   return (
                     <tr key={r.id} className={`border-t hover:bg-gray-50 ${i === 0 ? "bg-amber-50/40" : ""}`}>
@@ -297,20 +507,28 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
                         {i === 0 ? <Trophy className="w-4 h-4 text-amber-500" /> : i + 1}
                       </td>
                       <td className="py-2.5 px-3 font-medium text-gray-900">{r.studentName ?? "—"}</td>
-                      <td className="py-2.5 px-3 text-center font-bold text-gray-800">{r.marksObtained} / {exam.totalMarks}</td>
+                      <td className="py-2.5 px-3 text-center font-bold text-gray-800">
+                        {r.marksObtained} / {exam.totalMarks}
+                      </td>
                       <td className="py-2.5 px-3 text-center text-gray-600">{pct}%</td>
                       <td className="py-2.5 px-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${gradeColor(r.grade)}`}>{r.grade}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold border ${gradeColor(r.grade)}`}>
+                          {r.grade}
+                        </span>
                       </td>
                       <td className="py-2.5 px-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${passed ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          passed ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
                           {passed ? "Pass" : "Fail"}
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-gray-500 text-xs">{r.remarks ?? "—"}</td>
                       <td className="py-2.5 px-3">
-                        <Button size="icon" variant="ghost" className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
-                          onClick={() => deleteResult(r.id)}>
+                        <Button
+                          size="icon" variant="ghost"
+                          className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
+                          onClick={() => deleteResult(r.id)}
+                        >
                           ×
                         </Button>
                       </td>
@@ -333,22 +551,20 @@ function AdminResultsView({ examId, exam, students, onAdded }: {
 
 // ─── Main Exams Page ──────────────────────────────────────────────────────────
 export default function Exams() {
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedExam, setSelectedExam] = useState<null | {
-    id: number; name: string; subject: string; totalMarks: number;
-    passingMarks: number; examDate: string; className?: string | null; classId: number;
-  }>(null);
+  const [createOpen,   setCreateOpen]   = useState(false);
+  const [selectedExam, setSelectedExam] = useState<ExamInfo | null>(null);
   const [studentResult, setStudentResult] = useState<ExamResult | null | "none">(null);
   const [loadingResult, setLoadingResult] = useState(false);
 
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const { toast }      = useToast();
+  const queryClient    = useQueryClient();
+  // TASK 6: Backend now filters exams by student's classId automatically
   const { data: exams, isLoading } = useListExams();
-  const { data: classes } = useListClasses();
-  const { data: students } = useListStudents({ status: "active" });
+  const { data: classes }          = useListClasses();
+  const { data: students }         = useListStudents({ status: "active" });
   const createMutation = useCreateExam();
-  const { user } = useAuthStore();
-  const isStudent = user?.role === "student";
+  const { user }       = useAuthStore();
+  const isStudent      = user?.role === "student";
 
   const form = useForm<z.infer<typeof examSchema>>({
     resolver: zodResolver(examSchema),
@@ -359,10 +575,10 @@ export default function Exams() {
     createMutation.mutate({
       data: {
         ...values,
-        classId: Number(values.classId),
-        totalMarks: Number(values.totalMarks),
+        classId:      Number(values.classId),
+        totalMarks:   Number(values.totalMarks),
         passingMarks: Number(values.passingMarks ?? 40),
-      }
+      },
     }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListExamsQueryKey() });
@@ -374,30 +590,20 @@ export default function Exams() {
     });
   };
 
-  const openExam = (exam: typeof selectedExam) => {
+  // TASK 6: Student sees only their class exams (backend filters), result also filtered by student
+  const openExam = (exam: ExamInfo) => {
     setSelectedExam(exam);
-    if (isStudent && exam) {
+    if (isStudent) {
       setStudentResult(null);
       setLoadingResult(true);
       fetch(`/api/exams/${exam.id}/results`, { headers: authHeader() as HeadersInit })
         .then(r => r.json())
-        .then((d: ExamResult[]) => setStudentResult(Array.isArray(d) && d.length > 0 ? d[0] : "none"))
+        .then((d: ExamResult[]) =>
+          setStudentResult(Array.isArray(d) && d.length > 0 ? d[0] : "none")
+        )
         .catch(() => setStudentResult("none"))
         .finally(() => setLoadingResult(false));
     }
-  };
-
-  const gradientForSubject = (subject: string) => {
-    const s = subject.toLowerCase();
-    if (s.includes("math")) return "from-blue-500 to-cyan-500";
-    if (s.includes("eng")) return "from-violet-500 to-fuchsia-500";
-    if (s.includes("urdu")) return "from-emerald-500 to-teal-500";
-    if (s.includes("science") || s.includes("bio")) return "from-green-500 to-lime-500";
-    if (s.includes("phys")) return "from-orange-500 to-amber-500";
-    if (s.includes("chem")) return "from-pink-500 to-rose-500";
-    if (s.includes("hist") || s.includes("geo")) return "from-amber-400 to-yellow-500";
-    if (s.includes("islam")) return "from-teal-500 to-cyan-500";
-    return "from-violet-500 to-fuchsia-500";
   };
 
   return (
@@ -407,13 +613,18 @@ export default function Exams() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Exams & Results</h1>
           <p className="text-gray-500 text-sm mt-1">
-            {isStudent ? "Your exam schedule and results" : "Manage exams, schedule tests and enter student results"}
+            {isStudent
+              ? "Your class exam schedule and your results"
+              : "Manage exams, schedule tests and enter student results"}
           </p>
         </div>
         {!isStudent && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white" data-testid="button-add-exam">
+              <Button
+                className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white"
+                data-testid="button-add-exam"
+              >
                 <Plus className="w-4 h-4 mr-2" /> Schedule Exam
               </Button>
             </DialogTrigger>
@@ -431,7 +642,9 @@ export default function Exams() {
                     <FormItem><FormLabel>Class *</FormLabel>
                       <Select onValueChange={field.onChange}>
                         <FormControl><SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger></FormControl>
-                        <SelectContent>{classes?.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                        <SelectContent>
+                          {classes?.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                        </SelectContent>
                       </Select><FormMessage />
                     </FormItem>
                   )} />
@@ -473,13 +686,13 @@ export default function Exams() {
         )}
       </div>
 
-      {/* Summary for student */}
+      {/* Student summary cards */}
       {isStudent && exams && exams.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "Total Exams", value: exams.length, gradient: "from-violet-500 to-fuchsia-500", icon: FileText },
-            { label: "Subjects", value: new Set(exams.map(e => e.subject)).size, gradient: "from-blue-500 to-cyan-500", icon: BookOpen },
-            { label: "Upcoming", value: exams.filter(e => new Date(e.examDate) >= new Date()).length, gradient: "from-amber-400 to-orange-500", icon: Calendar },
+            { label: "Total Exams",  value: exams.length,                                                 gradient: "from-violet-500 to-fuchsia-500", icon: FileText  },
+            { label: "Subjects",     value: new Set(exams.map(e => e.subject)).size,                      gradient: "from-blue-500 to-cyan-500",       icon: BookOpen  },
+            { label: "Upcoming",     value: exams.filter(e => new Date(e.examDate) >= new Date()).length, gradient: "from-amber-400 to-orange-500",    icon: Calendar  },
           ].map((c, i) => (
             <motion.div key={c.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
               <Card className="overflow-hidden border-0 shadow-sm">
@@ -503,7 +716,7 @@ export default function Exams() {
       {/* Exam cards */}
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1,2,3].map(i => <Skeleton key={i} className="h-44 w-full rounded-xl" />)}
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-44 w-full rounded-xl" />)}
         </div>
       ) : !exams?.length ? (
         <div className="py-20 text-center text-gray-400">
@@ -524,19 +737,18 @@ export default function Exams() {
                 <Card
                   className="hover:shadow-md transition-all duration-200 border border-gray-100 cursor-pointer group"
                   onClick={() => openExam({
-                    id: exam.id,
-                    name: exam.name,
-                    subject: exam.subject,
-                    totalMarks: Number(exam.totalMarks),
+                    id:           exam.id,
+                    name:         exam.name,
+                    subject:      exam.subject,
+                    totalMarks:   Number(exam.totalMarks),
                     passingMarks: Number(exam.passingMarks),
-                    examDate: exam.examDate,
-                    className: exam.className,
-                    classId: exam.classId,
+                    examDate:     exam.examDate,
+                    className:    exam.className,
+                    classId:      exam.classId,
                   })}
                   data-testid={`card-exam-${exam.id}`}
                 >
                   <CardContent className="p-0">
-                    {/* Colored top bar */}
                     <div className={`bg-gradient-to-r ${gradientForSubject(exam.subject)} h-1.5 rounded-t-lg`} />
                     <div className="p-5">
                       <div className="flex items-start justify-between mb-3">
@@ -576,20 +788,17 @@ export default function Exams() {
       )}
 
       {/* Results Modal */}
-      <Dialog open={!!selectedExam} onOpenChange={open => { if (!open) { setSelectedExam(null); setStudentResult(null); } }}>
-        <DialogContent className={isStudent ? "max-w-sm" : "max-w-3xl"}>
+      <Dialog
+        open={!!selectedExam}
+        onOpenChange={open => { if (!open) { setSelectedExam(null); setStudentResult(null); } }}
+      >
+        <DialogContent className={isStudent ? "max-w-sm" : "max-w-4xl"}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {isStudent ? (
-                <>
-                  <TrendingUp className="w-5 h-5 text-violet-600" />
-                  My Result — {selectedExam?.subject}
-                </>
+                <><TrendingUp className="w-5 h-5 text-violet-600" /> My Result — {selectedExam?.subject}</>
               ) : (
-                <>
-                  <Trophy className="w-5 h-5 text-amber-500" />
-                  Results — {selectedExam?.name} ({selectedExam?.subject})
-                </>
+                <><Trophy className="w-5 h-5 text-amber-500" /> Results — {selectedExam?.name} ({selectedExam?.subject})</>
               )}
             </DialogTitle>
           </DialogHeader>

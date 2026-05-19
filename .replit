@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -40,3 +40,6 @@ externalPort = 3000
 [userenv.shared]
 NEON_DATABASE_URL = "postgresql://neondb_owner:npg_7U1HiQyVdIoL@ep-jolly-sound-ao07k2nu-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 JWT_SECRET = "mn82bgsl0poehfbvgslkmjhnbtics"
+
+[nix]
+channel = "stable-25_05"

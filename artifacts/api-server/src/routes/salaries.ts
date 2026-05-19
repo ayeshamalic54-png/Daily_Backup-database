@@ -1,62 +1,123 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { salariesTable, staffTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
+import type { Request } from "express";
+
+type AuthReq = Request & { user: { id: number; role: string } };
 
 const router = Router();
 
-async function enrichSalary(sal: Record<string, unknown>) {
-  const [staff] = await db.select({ name: staffTable.name }).from(staffTable).where(eq(staffTable.id, Number(sal.staffId)));
-  return { ...sal, amount: Number(sal.amount ?? 0), staffName: staff?.name ?? null };
-}
-
-// GET /api/salaries
+// GET /api/salaries — list all (admin only)
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const { staffId, month, status } = req.query;
-    const conditions = [];
-    if (staffId) conditions.push(eq(salariesTable.staffId, Number(staffId)));
-    if (month) conditions.push(eq(salariesTable.month, String(month)));
-    if (status) conditions.push(eq(salariesTable.status, String(status)));
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
 
-    const sals = conditions.length > 0
-      ? await db.select().from(salariesTable).where(and(...conditions))
-      : await db.select().from(salariesTable);
+    const rows = await db.select().from(salariesTable).orderBy(desc(salariesTable.createdAt));
+    const staffList = await db.select({ id: staffTable.id, name: staffTable.name }).from(staffTable);
+    const staffMap = Object.fromEntries(staffList.map(s => [s.id, s.name]));
 
-    const result = await Promise.all(sals.map(s => enrichSalary(s as unknown as Record<string, unknown>)));
-    res.json(result);
+    res.json(rows.map(r => ({
+      ...r,
+      amount: Number(r.amount),
+      staffName: staffMap[r.staffId] ?? "—",
+    })));
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// POST /api/salaries
+// GET /api/salaries/:staffId/history — salary history for a staff member
+router.get("/:staffId/history", requireAuth, async (req, res) => {
+  try {
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+
+    const rows = await db
+      .select()
+      .from(salariesTable)
+      .where(eq(salariesTable.staffId, Number(req.params.staffId)))
+      .orderBy(desc(salariesTable.createdAt));
+
+    res.json(rows.map(r => ({ ...r, amount: Number(r.amount) })));
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/salaries — create salary record (admin only)
 router.post("/", requireAuth, async (req, res) => {
   try {
-    const [sal] = await db.insert(salariesTable).values({ ...req.body, status: "unpaid" }).returning();
-    const enriched = await enrichSalary(sal as unknown as Record<string, unknown>);
-    res.status(201).json(enriched);
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+
+    const { staffId, amount, month, status, paidDate } = req.body;
+    if (!staffId || !amount || !month) {
+      res.status(400).json({ error: "staffId, amount, and month are required" });
+      return;
+    }
+
+    const [row] = await db.insert(salariesTable).values({
+      staffId: Number(staffId),
+      amount: String(amount),
+      month,
+      status: status ?? "unpaid",
+      paidDate: paidDate ?? null,
+    }).returning();
+
+    const [staff] = await db.select({ name: staffTable.name }).from(staffTable).where(eq(staffTable.id, Number(staffId)));
+
+    res.status(201).json({ ...row, amount: Number(row.amount), staffName: staff?.name ?? "—" });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// POST /api/salaries/:id/pay
-router.post("/:id/pay", requireAuth, async (req, res) => {
+// PUT /api/salaries/:id — update salary / mark as paid (admin only)
+router.put("/:id", requireAuth, async (req, res) => {
   try {
-    const [updated] = await db.update(salariesTable).set({
-      status: "paid",
-      paidDate: new Date().toISOString().split("T")[0],
-    }).where(eq(salariesTable.id, Number(req.params.id))).returning();
-    if (!updated) {
-      res.status(404).json({ error: "Salary record not found" });
-      return;
-    }
-    const enriched = await enrichSalary(updated as unknown as Record<string, unknown>);
-    res.json(enriched);
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+
+    const [existing] = await db.select().from(salariesTable).where(eq(salariesTable.id, Number(req.params.id)));
+    if (!existing) { res.status(404).json({ error: "Record not found" }); return; }
+
+    const { amount, month, status, paidDate } = req.body;
+
+    const [updated] = await db
+      .update(salariesTable)
+      .set({
+        amount:   amount   !== undefined ? String(amount) : existing.amount,
+        month:    month    !== undefined ? month          : existing.month,
+        status:   status   !== undefined ? status         : existing.status,
+        paidDate: paidDate !== undefined ? paidDate       : existing.paidDate,
+      })
+      .where(eq(salariesTable.id, Number(req.params.id)))
+      .returning();
+
+    res.json({ ...updated, amount: Number(updated.amount) });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /api/salaries/:id (admin only)
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const reqUser = (req as AuthReq).user;
+    if (reqUser.role !== "admin") { res.status(403).json({ error: "Admin only" }); return; }
+
+    const [existing] = await db.select().from(salariesTable).where(eq(salariesTable.id, Number(req.params.id)));
+    if (!existing) { res.status(404).json({ error: "Record not found" }); return; }
+
+    await db.delete(salariesTable).where(eq(salariesTable.id, Number(req.params.id)));
+    res.status(204).send();
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Internal server error" });

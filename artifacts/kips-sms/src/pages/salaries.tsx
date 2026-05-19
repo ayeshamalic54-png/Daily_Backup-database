@@ -1,21 +1,45 @@
+// ============================================================
+// FILE PATH: src/pages/salaries.tsx
+// COMPLETE REPLACEMENT FILE
+// Changes vs original:
+//   - Admin ke liye Pencil (edit) button added
+//   - Admin ke liye Trash2 (delete) button added
+//   - Edit dialog: staff, amount, month change kar sakte ho
+//   - Delete confirm dialog
+//   - apiFetch helper (PUT/DELETE) added
+//   - useAuthStore se role check
+// ============================================================
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useListSalaries, useCreateSalary, usePaySalary, useListStaff, getListSalariesQueryKey } from "@workspace/api-client-react";
+import {
+  useListSalaries, useCreateSalary, usePaySalary,
+  useListStaff, getListSalariesQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button }   from "@/components/ui/button";
+import { Input }    from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
+} from "@/components/ui/form";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useForm } from "react-hook-form";
+import { useForm }  from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { z }        from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Loader2, Printer, FileText, X, RefreshCw, CheckCircle } from "lucide-react";
+import {
+  Plus, Loader2, Printer, FileText,
+  X, RefreshCw, CheckCircle, Pencil, Trash2,
+} from "lucide-react";
+import { useAuthStore } from "@/lib/auth";
 
-// @page margin:0 removes browser URL / date headers & footers from print
+// ── Print styles ──────────────────────────────────────────────────────────────
 const PRINT_STYLES = `
   @page { size: A4 portrait; margin: 0; }
   @media print {
@@ -41,46 +65,77 @@ const PRINT_STYLES = `
   }
 `;
 
-const schema = z.object({
+// ── Schemas ───────────────────────────────────────────────────────────────────
+const createSchema = z.object({
+  staffId: z.string().min(1, "Staff required"),
+  amount:  z.string().min(1, "Amount required"),
+  month:   z.string().min(1, "Month required"),
+});
+
+const editSchema = z.object({
   staffId: z.string().min(1, "Staff required"),
   amount:  z.string().min(1, "Amount required"),
   month:   z.string().min(1, "Month required"),
 });
 
 const deductionSchema = z.object({
-  absentDays:           z.string().default("0"),
-  lateDays:             z.string().default("0"),
-  tax:                  z.string().default("0"),
-  otherDeduction:       z.string().default("0"),
-  otherDeductionLabel:  z.string().default(""),
-  allowance:            z.string().default("0"),
-  allowanceLabel:       z.string().default(""),
+  absentDays:          z.string().default("0"),
+  lateDays:            z.string().default("0"),
+  tax:                 z.string().default("0"),
+  otherDeduction:      z.string().default("0"),
+  otherDeductionLabel: z.string().default(""),
+  allowance:           z.string().default("0"),
+  allowanceLabel:      z.string().default(""),
 });
 
+// ── Type ──────────────────────────────────────────────────────────────────────
 type Salary = {
-  id: number;
-  staffId?:    number;
-  staffName?:  string | null;
-  month:       string;
-  amount:      number;
-  status:      string;
-  paidDate?:   string | null;
+  id:         number;
+  staffId?:   number;
+  staffName?: string | null;
+  month:      string;
+  amount:     number;
+  status:     string;
+  paidDate?:  string | null;
 };
 
+// ── Auth helper ───────────────────────────────────────────────────────────────
 function authHeader() {
   const token = localStorage.getItem("kips_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// ─── Salary Slip Modal ────────────────────────────────────────────────────────
+async function apiFetch(path: string, options?: RequestInit) {
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader(),
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "Request failed");
+    throw new Error(msg);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── Salary Slip Modal ─────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
 function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }) {
-  const slipRef   = useRef<HTMLDivElement>(null);
+  const slipRef = useRef<HTMLDivElement>(null);
   const [attLoading, setAttLoading] = useState(false);
   const [attLoaded, setAttLoaded]   = useState(false);
 
   const form = useForm<z.infer<typeof deductionSchema>>({
     resolver: zodResolver(deductionSchema),
-    defaultValues: { absentDays: "0", lateDays: "0", tax: "0", otherDeduction: "0", otherDeductionLabel: "", allowance: "0", allowanceLabel: "" },
+    defaultValues: {
+      absentDays: "0", lateDays: "0", tax: "0",
+      otherDeduction: "0", otherDeductionLabel: "",
+      allowance: "0", allowanceLabel: "",
+    },
   });
 
   useEffect(() => {
@@ -94,7 +149,7 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
       .then(data => {
         if (data && typeof data.absent === "number") {
           form.setValue("absentDays", String(data.absent));
-          form.setValue("lateDays", String(data.late));
+          form.setValue("lateDays",   String(data.late));
           setAttLoaded(true);
         }
       })
@@ -106,10 +161,10 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
   const basicSalary = salary.amount;
   const perDay      = Math.round(basicSalary / 26);
   const absentDed   = Number(values.absentDays || 0) * perDay;
-  const lateDed     = Number(values.lateDays || 0) * Math.round(perDay / 2);
-  const taxDed      = Number(values.tax || 0);
+  const lateDed     = Number(values.lateDays   || 0) * Math.round(perDay / 2);
+  const taxDed      = Number(values.tax        || 0);
   const otherDed    = Number(values.otherDeduction || 0);
-  const allowance   = Number(values.allowance || 0);
+  const allowance   = Number(values.allowance  || 0);
   const totalDeductions = absentDed + lateDed + taxDed + otherDed;
   const netSalary   = basicSalary + allowance - totalDeductions;
 
@@ -117,8 +172,6 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
     ? new Date(salary.month.slice(0, 7) + "-01").toLocaleDateString("en-PK", { month: "long", year: "numeric" })
     : salary.month;
 
-  // Salary slip uses window.open (separate window) — no portal needed,
-  // @page margin:0 in the new window's CSS removes URL footer there too.
   const handlePrint = () => {
     const content = slipRef.current?.innerHTML;
     const w = window.open("", "_blank");
@@ -158,7 +211,7 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
           <div className="space-y-3">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Deductions & Allowances</h3>
-              {attLoading && <span className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Loading...</span>}
+              {attLoading  && <span className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Loading...</span>}
               {attLoaded && !attLoading && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Auto-loaded</span>}
             </div>
             <Form {...form}>
@@ -226,7 +279,7 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
             </div>
           </div>
 
-          {/* Right: Printable slip preview */}
+          {/* Right: Slip preview */}
           <div className="border rounded-xl p-4 bg-gray-50 overflow-auto" ref={slipRef}>
             <div style={{ textAlign: "center", borderBottom: "2px solid #1a2a5e", paddingBottom: 10, marginBottom: 10 }}>
               <div style={{ fontSize: 17, fontWeight: "bold", color: "#1a2a5e" }}>KIPS School Hassari</div>
@@ -255,8 +308,8 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
                 <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd" }}>Basic Salary</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right" }}>{basicSalary.toLocaleString()}</td></tr>
                 {allowance > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#16a34a" }}>+ {values.allowanceLabel || "Allowance"}</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#16a34a" }}>+{allowance.toLocaleString()}</td></tr>}
                 {absentDed > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- Absent ({values.absentDays}d × {perDay.toLocaleString()})</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{absentDed.toLocaleString()}</td></tr>}
-                {lateDed > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- Late ({values.lateDays}d × {Math.round(perDay / 2).toLocaleString()})</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{lateDed.toLocaleString()}</td></tr>}
-                {taxDed > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- Tax</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{taxDed.toLocaleString()}</td></tr>}
+                {lateDed  > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- Late ({values.lateDays}d × {Math.round(perDay / 2).toLocaleString()})</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{lateDed.toLocaleString()}</td></tr>}
+                {taxDed   > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- Tax</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{taxDed.toLocaleString()}</td></tr>}
                 {otherDed > 0 && <tr><td style={{ padding: "3px 6px", border: "1px solid #ddd", color: "#dc2626" }}>- {values.otherDeductionLabel || "Other"}</td><td style={{ padding: "3px 6px", border: "1px solid #ddd", textAlign: "right", color: "#dc2626" }}>-{otherDed.toLocaleString()}</td></tr>}
                 <tr style={{ background: "#fff7f7" }}><td style={{ padding: "4px 6px", border: "1px solid #ddd", fontWeight: "bold" }}>Total Deductions</td><td style={{ padding: "4px 6px", border: "1px solid #ddd", textAlign: "right", fontWeight: "bold", color: "#dc2626" }}>-{totalDeductions.toLocaleString()}</td></tr>
                 <tr style={{ background: "#1a2a5e", color: "white" }}><td style={{ padding: 6, border: "1px solid #1a2a5e", fontWeight: "bold" }}>NET SALARY</td><td style={{ padding: 6, border: "1px solid #1a2a5e", textAlign: "right", fontWeight: "bold" }}>PKR {netSalary.toLocaleString()}</td></tr>
@@ -276,18 +329,31 @@ function SalarySlip({ salary, onClose }: { salary: Salary; onClose: () => void }
   );
 }
 
-// ─── Main Salaries Page ───────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// ── Main Salaries Page ────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
 export default function Salaries() {
-  const [open, setOpen]               = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string | undefined>();
-  const [slipSalary, setSlipSalary]   = useState<Salary | null>(null);
-  const { toast }      = useToast();
-  const queryClient    = useQueryClient();
+  const [open, setOpen]                     = useState(false);
+  const [statusFilter, setStatusFilter]     = useState<string | undefined>();
+  const [slipSalary, setSlipSalary]         = useState<Salary | null>(null);
 
-  const { data: salaries, isLoading } = useListSalaries(statusFilter ? { status: statusFilter as "paid" | "unpaid" } : {});
-  const { data: staff }   = useListStaff();
-  const createMutation    = useCreateSalary();
-  const payMutation       = usePaySalary();
+  // ── Edit / Delete state ───────────────────────────────────────────────────
+  const [editTarget, setEditTarget]         = useState<Salary | null>(null);
+  const [editSaving, setEditSaving]         = useState(false);
+  const [deleteTarget, setDeleteTarget]     = useState<Salary | null>(null);
+  const [deletingId, setDeletingId]         = useState<number | null>(null);
+
+  const { toast }   = useToast();
+  const queryClient = useQueryClient();
+  const { user }    = useAuthStore();
+  const isAdmin     = user?.role === "admin";
+
+  const { data: salaries, isLoading } = useListSalaries(
+    statusFilter ? { status: statusFilter as "paid" | "unpaid" } : {}
+  );
+  const { data: staff }  = useListStaff();
+  const createMutation   = useCreateSalary();
+  const payMutation      = usePaySalary();
 
   useEffect(() => {
     const existing = document.getElementById("kips-print-styles");
@@ -299,41 +365,99 @@ export default function Salaries() {
     return () => { document.getElementById("kips-print-styles")?.remove(); };
   }, []);
 
-  const form = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
+  // ── Create form ───────────────────────────────────────────────────────────
+  const createForm = useForm<z.infer<typeof createSchema>>({ resolver: zodResolver(createSchema) });
 
-  const onSubmit = (values: z.infer<typeof schema>) => {
-    createMutation.mutate({ data: { staffId: Number(values.staffId), amount: Number(values.amount), month: values.month } }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() });
-        toast({ title: "Salary record created" });
-        setOpen(false);
-        form.reset();
-      },
-      onError: () => toast({ variant: "destructive", title: "Failed to create salary record" }),
+  const onCreateSubmit = (values: z.infer<typeof createSchema>) => {
+    createMutation.mutate(
+      { data: { staffId: Number(values.staffId), amount: Number(values.amount), month: values.month } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() });
+          toast({ title: "Salary record created" });
+          setOpen(false);
+          createForm.reset();
+        },
+        onError: () => toast({ variant: "destructive", title: "Failed to create salary record" }),
+      }
+    );
+  };
+
+  // ── Edit form ─────────────────────────────────────────────────────────────
+  const editForm = useForm<z.infer<typeof editSchema>>({ resolver: zodResolver(editSchema) });
+
+  const openEdit = (sal: Salary) => {
+    setEditTarget(sal);
+    editForm.reset({
+      staffId: String(sal.staffId ?? ""),
+      amount:  String(sal.amount),
+      month:   sal.month.slice(0, 7),   // "2026-05"
     });
   };
 
+  const onEditSubmit = async (values: z.infer<typeof editSchema>) => {
+    if (!editTarget) return;
+    setEditSaving(true);
+    try {
+      await apiFetch(`/api/salaries/${editTarget.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          staffId: Number(values.staffId),
+          amount:  Number(values.amount),
+          month:   values.month,
+        }),
+      });
+      queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() });
+      toast({ title: "Salary record updated" });
+      setEditTarget(null);
+    } catch (e: unknown) {
+      toast({ variant: "destructive", title: "Update failed", description: e instanceof Error ? e.message : "" });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDelete = async (sal: Salary) => {
+    setDeletingId(sal.id);
+    try {
+      await apiFetch(`/api/salaries/${sal.id}`, { method: "DELETE" });
+      queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() });
+      toast({ title: "Salary record deleted" });
+      setDeleteTarget(null);
+    } catch (e: unknown) {
+      toast({ variant: "destructive", title: "Delete failed", description: e instanceof Error ? e.message : "" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // ── Pay ───────────────────────────────────────────────────────────────────
   const handlePay = (id: number) => {
     if (!confirm("Mark this salary as paid?")) return;
     payMutation.mutate({ id }, {
-      onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() }); toast({ title: "Salary marked as paid" }); },
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListSalariesQueryKey() });
+        toast({ title: "Salary marked as paid" });
+      },
       onError: () => toast({ variant: "destructive", title: "Payment failed" }),
     });
   };
 
+  // ── Summary numbers ───────────────────────────────────────────────────────
   const totalPaid    = salaries?.filter(s => s.status === "paid").reduce((a, s) => a + s.amount, 0)   ?? 0;
   const totalPending = salaries?.filter(s => s.status === "unpaid").reduce((a, s) => a + s.amount, 0) ?? 0;
 
   const printDate = new Date().toLocaleDateString("en-PK", { day: "numeric", month: "long", year: "numeric" });
 
-  // Print table styles
-  const th = { padding: "8px 10px", background: "#dbeafe", color: "#1e3a8a", fontWeight: 700, fontSize: 10, textAlign: "left" as const, border: "1px solid #93c5fd" };
+  // Print table cell styles
+  const th  = { padding: "8px 10px", background: "#dbeafe", color: "#1e3a8a", fontWeight: 700, fontSize: 10, textAlign: "left" as const, border: "1px solid #93c5fd" };
   const td  = { padding: "7px 10px", border: "1px solid #e5e7eb", fontSize: 10, color: "#1f2937", background: "#ffffff" };
   const tdA = { ...td, background: "#f0f9ff" };
 
+  // ── Print portal ──────────────────────────────────────────────────────────
   const printPortal = createPortal(
     <div id="kips-print-portal" style={{ position: "absolute", left: "-99999px", top: "-99999px", fontFamily: "Arial, sans-serif", background: "white", color: "#111827" }}>
-
       {/* Letterhead */}
       <div style={{ display: "flex", alignItems: "center", gap: 18, borderBottom: "3px solid #1e3a8a", paddingBottom: 14, marginBottom: 20 }}>
         <img src="/kips-logo.jpeg" alt="KIPS" style={{ width: 80, height: 80, objectFit: "contain", flexShrink: 0 }} />
@@ -343,17 +467,15 @@ export default function Salaries() {
           <p style={{ margin: "4px 0 0", fontSize: 10, color: "#6b7280" }}>{printDate}</p>
         </div>
       </div>
-
       {/* Title */}
       <div style={{ textAlign: "center", marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#1e3a8a" }}>Salary Report</h2>
         <p style={{ margin: "3px 0 0", fontSize: 10, color: "#6b7280" }}>Staff salary management & payroll summary</p>
       </div>
-
-      {/* Summary */}
+      {/* Summary cards */}
       <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
         {[
-          { label: "Total Records", value: (salaries ?? []).length, color: "#1d4ed8" },
+          { label: "Total Records", value: (salaries ?? []).length,                         color: "#1d4ed8" },
           { label: "Total Paid",    value: `PKR ${totalPaid.toLocaleString()}`,    color: "#065f46" },
           { label: "Pending",       value: `PKR ${totalPending.toLocaleString()}`, color: "#b91c1c" },
         ].map(c => (
@@ -363,7 +485,6 @@ export default function Salaries() {
           </div>
         ))}
       </div>
-
       {/* Table */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ width: 4, height: 18, background: "#1d4ed8", borderRadius: 2 }} />
@@ -401,7 +522,6 @@ export default function Salaries() {
           </tfoot>
         )}
       </table>
-
       {/* Footer */}
       <div style={{ borderTop: "1px solid #e5e7eb", marginTop: 28, paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
         <p style={{ margin: 0, fontSize: 8, color: "#9ca3af" }}>KIPS School Hassari — Bright Future School Management Portal</p>
@@ -411,12 +531,14 @@ export default function Salaries() {
     document.body
   );
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
       {printPortal}
       {slipSalary && <SalarySlip salary={slipSalary} onClose={() => setSlipSalary(null)} />}
 
       <div className="space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Salaries</h1>
@@ -426,6 +548,7 @@ export default function Salaries() {
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="w-4 h-4 mr-1" /> Print
             </Button>
+            {/* Create button — admin + teacher */}
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button className="bg-gradient-to-r from-cyan-600 to-blue-600 text-white">
@@ -434,19 +557,19 @@ export default function Salaries() {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>New Salary Record</DialogTitle></DialogHeader>
-                <Form {...form}>
-                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                    <FormField control={form.control} name="staffId" render={({ field }) => (
+                <Form {...createForm}>
+                  <form onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4">
+                    <FormField control={createForm.control} name="staffId" render={({ field }) => (
                       <FormItem><FormLabel>Staff Member *</FormLabel>
                         <Select onValueChange={field.onChange}><FormControl><SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger></FormControl>
                           <SelectContent>{staff?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.role})</SelectItem>)}</SelectContent>
                         </Select><FormMessage />
                       </FormItem>
                     )} />
-                    <FormField control={form.control} name="amount" render={({ field }) => (
+                    <FormField control={createForm.control} name="amount" render={({ field }) => (
                       <FormItem><FormLabel>Basic Salary (PKR) *</FormLabel><FormControl><Input type="number" placeholder="35000" {...field} /></FormControl><FormMessage /></FormItem>
                     )} />
-                    <FormField control={form.control} name="month" render={({ field }) => (
+                    <FormField control={createForm.control} name="month" render={({ field }) => (
                       <FormItem><FormLabel>Month *</FormLabel><FormControl><Input type="month" {...field} /></FormControl><FormMessage /></FormItem>
                     )} />
                     <div className="flex justify-end gap-2">
@@ -462,9 +585,10 @@ export default function Salaries() {
           </div>
         </div>
 
+        {/* Summary cards */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "Total Records", value: (salaries?.length ?? 0).toString(), gradient: "from-blue-500 to-cyan-500" },
+            { label: "Total Records", value: (salaries?.length ?? 0).toString(),          gradient: "from-blue-500 to-cyan-500" },
             { label: "Total Paid",    value: `PKR ${totalPaid.toLocaleString()}`,    gradient: "from-emerald-500 to-green-500" },
             { label: "Pending",       value: `PKR ${totalPending.toLocaleString()}`, gradient: "from-red-500 to-rose-600"      },
           ].map(c => (
@@ -479,12 +603,17 @@ export default function Salaries() {
           ))}
         </div>
 
+        {/* Status filters */}
         <div className="flex gap-2">
           {[{ val: undefined, label: "All" }, { val: "paid", label: "Paid" }, { val: "unpaid", label: "Unpaid" }].map(f => (
-            <Button key={f.label} size="sm" variant={statusFilter === f.val ? "default" : "outline"} onClick={() => setStatusFilter(f.val)}>{f.label}</Button>
+            <Button key={f.label} size="sm"
+              variant={statusFilter === f.val ? "default" : "outline"}
+              onClick={() => setStatusFilter(f.val)}
+            >{f.label}</Button>
           ))}
         </div>
 
+        {/* Table */}
         <Card>
           <CardContent className="p-0">
             {isLoading
@@ -502,7 +631,7 @@ export default function Salaries() {
                     <tbody>
                       {!salaries?.length
                         ? <tr><td colSpan={6} className="py-12 text-center text-gray-400">No salary records found</td></tr>
-                        : salaries?.map(sal => (
+                        : salaries.map(sal => (
                           <tr key={sal.id} className="border-b hover:bg-gray-50">
                             <td className="py-3 px-3 font-medium text-gray-900">{sal.staffName || "—"}</td>
                             <td className="py-3 px-3 text-gray-600">{sal.month}</td>
@@ -515,11 +644,46 @@ export default function Salaries() {
                             </td>
                             <td className="py-3 px-3">
                               <div className="flex items-center gap-1">
-                                <Button size="sm" variant="outline" className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50" onClick={() => setSlipSalary(sal as Salary)}>
+                                {/* Salary Slip */}
+                                <Button size="sm" variant="outline"
+                                  className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50"
+                                  onClick={() => setSlipSalary(sal as Salary)}
+                                >
                                   <FileText className="w-3 h-3 mr-1" /> Slip
                                 </Button>
+
+                                {/* Pay button */}
                                 {sal.status === "unpaid" && (
-                                  <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handlePay(sal.id)} disabled={payMutation.isPending}>Pay</Button>
+                                  <Button size="sm"
+                                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                    onClick={() => handlePay(sal.id)}
+                                    disabled={payMutation.isPending}
+                                  >Pay</Button>
+                                )}
+
+                                {/* Edit — admin only */}
+                                {isAdmin && (
+                                  <Button size="sm" variant="outline"
+                                    className="h-7 w-7 p-0 text-blue-600 border-blue-200 hover:bg-blue-50"
+                                    title="Edit salary"
+                                    onClick={() => openEdit(sal as Salary)}
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+
+                                {/* Delete — admin only */}
+                                {isAdmin && (
+                                  <Button size="sm" variant="outline"
+                                    className="h-7 w-7 p-0 text-red-600 border-red-200 hover:bg-red-50"
+                                    title="Delete salary"
+                                    onClick={() => setDeleteTarget(sal as Salary)}
+                                    disabled={deletingId === sal.id}
+                                  >
+                                    {deletingId === sal.id
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <Trash2 className="w-3.5 h-3.5" />}
+                                  </Button>
                                 )}
                               </div>
                             </td>
@@ -534,6 +698,71 @@ export default function Salaries() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Edit Salary Dialog ──────────────────────────────────────────────────── */}
+      <Dialog open={!!editTarget} onOpenChange={o => { if (!o) setEditTarget(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Salary Record Edit Karo</DialogTitle></DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+              <FormField control={editForm.control} name="staffId" render={({ field }) => (
+                <FormItem><FormLabel>Staff Member *</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {staff?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.role})</SelectItem>)}
+                    </SelectContent>
+                  </Select><FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={editForm.control} name="amount" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Basic Salary (PKR) *</FormLabel>
+                  <FormControl><Input type="number" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={editForm.control} name="month" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Month *</FormLabel>
+                  <FormControl><Input type="month" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              {editTarget?.status === "paid" && (
+                <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-700">
+                  ⚠ Yeh salary already paid mark hai — sirf amount aur month edit hoga, status nahi badle ga
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+                <Button type="submit" disabled={editSaving}>
+                  {editSaving && <Loader2 className="w-4 h-4 animate-spin mr-2" />} Update
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirm Dialog ────────────────────────────────────────────────── */}
+      <Dialog open={!!deleteTarget} onOpenChange={o => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Salary Record Delete?</DialogTitle></DialogHeader>
+          <p className="text-sm text-gray-600">
+            <strong>{deleteTarget?.staffName}</strong> — {deleteTarget?.month} ka salary record permanently delete ho jaye ga.
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive"
+              disabled={!!deletingId}
+              onClick={() => deleteTarget && handleDelete(deleteTarget)}
+            >
+              {deletingId ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null} Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

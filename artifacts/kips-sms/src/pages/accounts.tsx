@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useListIncome, useListExpenses, useCreateIncome, useCreateExpense, useGetAccountSummary, useListFees, getListIncomeQueryKey, getListExpensesQueryKey, getGetAccountSummaryQueryKey } from "@workspace/api-client-react";
+import {
+  useListIncome, useListExpenses, useCreateIncome, useCreateExpense,
+  useGetAccountSummary, useListFees, useListSalaries,
+  getListIncomeQueryKey, getListExpensesQueryKey, getGetAccountSummaryQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,10 +20,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Loader2, Printer, TrendingUp, TrendingDown, DollarSign, CreditCard } from "lucide-react";
 
 // ─── PRINT CSS ────────────────────────────────────────────────────────────────
-// Portal approach: renders print div as direct body child.
-// body > * { display:none } hides React root.
-// #kips-print-portal is NOT inside React root, so it's visible.
-// No blank pages. No font issues.
 const PRINT_STYLES = `
   @page { size: A4 portrait; margin: 0; }
   @media print {
@@ -55,12 +55,11 @@ const schema = z.object({
 const printDate = new Date().toLocaleDateString("en-PK", { day: "numeric", month: "long", year: "numeric" });
 
 export default function Accounts() {
-  const [tab, setTab]               = useState("summary");
-  const [addIncomeOpen, setAddIncomeOpen]   = useState(false);
+  const [addIncomeOpen,  setAddIncomeOpen]  = useState(false);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
   const currentMonth = new Date().toISOString().slice(0, 7);
-  const { toast }        = useToast();
-  const queryClient      = useQueryClient();
+  const { toast }   = useToast();
+  const queryClient = useQueryClient();
 
   // Inject print styles
   useEffect(() => {
@@ -73,22 +72,31 @@ export default function Accounts() {
     return () => { document.getElementById("kips-print-styles")?.remove(); };
   }, []);
 
-  const { data: summary, isLoading: summaryLoading } = useGetAccountSummary({ month: currentMonth });
-  const { data: income,   isLoading: incomeLoading  } = useListIncome({ month: currentMonth });
+  // ── Data fetching ──────────────────────────────────────────────────────────
+  const { data: summary,  isLoading: summaryLoading  } = useGetAccountSummary({ month: currentMonth });
+  const { data: income,   isLoading: incomeLoading   } = useListIncome({ month: currentMonth });
   const { data: expenses, isLoading: expensesLoading } = useListExpenses({ month: currentMonth });
   const { data: allFees,  isLoading: feesLoading     } = useListFees({});
+  const { data: salaries, isLoading: salariesLoading } = useListSalaries({ month: currentMonth });
 
+  // ── Calculations ───────────────────────────────────────────────────────────
   const feesPaidThisMonth = (allFees ?? []).filter(
     f => f.paidDate?.startsWith(currentMonth) && (f.paidAmount ?? 0) > 0
   );
   const feeIncomeTotal    = feesPaidThisMonth.reduce((s, f) => s + (f.paidAmount ?? 0), 0);
   const manualIncomeTotal = (income ?? []).reduce((s, e) => s + (e.amount ?? 0), 0);
   const totalIncomeValue  = feeIncomeTotal + manualIncomeTotal;
-  const expensesTotal     = (expenses ?? []).reduce((s, e) => s + (e.amount ?? 0), 0);
-  const totalExpensesValue = expensesTotal > 0 ? expensesTotal : (summary?.totalExpenses ?? 0);
-  const netProfitValue    = totalIncomeValue - totalExpensesValue;
-  const isLoadingAny      = summaryLoading || feesLoading || incomeLoading || expensesLoading;
 
+  // Task 8: salary payments included in expenses
+  const salaryPaidTotal    = (salaries ?? [])
+    .filter(s => s.status === "paid")
+    .reduce((sum, s) => sum + Number(s.amount ?? 0), 0);
+  const manualExpenses     = (expenses ?? []).reduce((s, e) => s + (e.amount ?? 0), 0);
+  const totalExpensesValue = manualExpenses + salaryPaidTotal;
+  const netProfitValue     = totalIncomeValue - totalExpensesValue;
+  const isLoadingAny       = summaryLoading || feesLoading || incomeLoading || expensesLoading || salariesLoading;
+
+  // ── Forms ──────────────────────────────────────────────────────────────────
   const createIncome  = useCreateIncome();
   const createExpense = useCreateExpense();
 
@@ -138,16 +146,30 @@ export default function Accounts() {
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <FormField control={form.control} name="amount" render={({ field }) => (
-          <FormItem><FormLabel>Amount (PKR) *</FormLabel><FormControl><Input type="number" placeholder="10000" {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Amount (PKR) *</FormLabel>
+            <FormControl><Input type="number" placeholder="10000" {...field} /></FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
         <FormField control={form.control} name="category" render={({ field }) => (
-          <FormItem><FormLabel>Category *</FormLabel><FormControl><Input placeholder={type === "income" ? "Donations, Canteen..." : "Salaries, Utilities..."} {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Category *</FormLabel>
+            <FormControl>
+              <Input placeholder={type === "income" ? "Donations, Canteen..." : "Salaries, Utilities..."} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
         <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Description *</FormLabel><FormControl><Input placeholder="Description..." {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Description *</FormLabel>
+            <FormControl><Input placeholder="Description..." {...field} /></FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
         <FormField control={form.control} name="date" render={({ field }) => (
-          <FormItem><FormLabel>Date *</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Date *</FormLabel>
+            <FormControl><Input type="date" {...field} /></FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
         <div className="flex justify-end gap-2">
           <Button type="submit" disabled={isPending}>
@@ -160,7 +182,7 @@ export default function Accounts() {
 
   const monthLabel = new Date().toLocaleDateString("en-PK", { month: "long", year: "numeric" });
 
-  // ── Print styles shared ──
+  // ── Print styles ──
   const th = (bg: string, color: string) => ({
     padding: "8px 12px", background: bg, color, fontWeight: 700,
     fontSize: 10, textAlign: "left" as const, border: "1px solid #e5e7eb",
@@ -168,7 +190,7 @@ export default function Accounts() {
   const td  = { padding: "7px 12px", border: "1px solid #e5e7eb", fontSize: 10, color: "#1f2937", background: "#ffffff" };
   const tdA = { ...td, background: "#f9fafb" };
 
-  // ─── PRINT PORTAL ──────────────────────────────────────────────────────────
+  // ─── PRINT PORTAL ───────────────────────────────────────────────────────────
   const printPortal = createPortal(
     <div
       id="kips-print-portal"
@@ -196,10 +218,10 @@ export default function Accounts() {
       {/* Summary row */}
       <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
         {[
-          { label: "Fee Income",     value: `PKR ${feeIncomeTotal.toLocaleString()}`,    color: "#1d4ed8" },
-          { label: "Other Income",   value: `PKR ${manualIncomeTotal.toLocaleString()}`, color: "#065f46" },
-          { label: "Total Expenses", value: `PKR ${totalExpensesValue.toLocaleString()}`,color: "#b91c1c" },
-          { label: "Net Profit",     value: `PKR ${netProfitValue.toLocaleString()}`,    color: netProfitValue >= 0 ? "#6d28d9" : "#b91c1c" },
+          { label: "Fee Income",     value: `PKR ${feeIncomeTotal.toLocaleString()}`,     color: "#1d4ed8" },
+          { label: "Other Income",   value: `PKR ${manualIncomeTotal.toLocaleString()}`,  color: "#065f46" },
+          { label: "Total Expenses", value: `PKR ${totalExpensesValue.toLocaleString()}`, color: "#b91c1c" },
+          { label: "Net Profit",     value: `PKR ${netProfitValue.toLocaleString()}`,     color: netProfitValue >= 0 ? "#6d28d9" : "#b91c1c" },
         ].map(c => (
           <div key={c.label} style={{ flex: "1 1 0", border: `2px solid ${c.color}`, borderRadius: 8, padding: "12px 10px", textAlign: "center", background: "#f9fafb" }}>
             <p style={{ margin: 0, fontSize: 9, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8 }}>{c.label}</p>
@@ -226,7 +248,7 @@ export default function Accounts() {
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr>{["Date Paid","Student Name","Fee Month","Amount (PKR)","Status"].map(h => <th key={h} style={th("#dbeafe","#1e3a8a")}>{h}</th>)}</tr>
+            <tr>{["Date Paid", "Student Name", "Fee Month", "Amount (PKR)", "Status"].map(h => <th key={h} style={th("#dbeafe", "#1e3a8a")}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {!feesPaidThisMonth.length
@@ -234,7 +256,7 @@ export default function Accounts() {
               : feesPaidThisMonth.map((f, i) => (
                 <tr key={f.id}>
                   <td style={i % 2 === 0 ? td : tdA}>{f.paidDate ?? "—"}</td>
-                  <td style={i % 2 === 0 ? td : tdA}>{(f as Record<string,unknown>).studentName as string ?? `Student #${f.studentId}`}</td>
+                  <td style={i % 2 === 0 ? td : tdA}>{(f as Record<string, unknown>).studentName as string ?? `Student #${f.studentId}`}</td>
                   <td style={i % 2 === 0 ? td : tdA}>{f.month}</td>
                   <td style={i % 2 === 0 ? td : tdA}>PKR {(f.paidAmount ?? 0).toLocaleString()}</td>
                   <td style={i % 2 === 0 ? td : tdA}>{f.status}</td>
@@ -244,10 +266,10 @@ export default function Accounts() {
           </tbody>
           {feesPaidThisMonth.length > 0 && (
             <tfoot>
-              <tr style={{ background: "#dbeafe" }}>
-                <td colSpan={3} style={th("#dbeafe","#1e3a8a")}>Total Fee Income</td>
-                <td style={{ ...th("#dbeafe","#1d4ed8"), fontWeight: 900 }}>PKR {feeIncomeTotal.toLocaleString()}</td>
-                <td style={th("#dbeafe","#1e3a8a")} />
+              <tr>
+                <td colSpan={3} style={th("#dbeafe", "#1e3a8a")}>Total Fee Income</td>
+                <td style={{ ...th("#dbeafe", "#1d4ed8"), fontWeight: 900 }}>PKR {feeIncomeTotal.toLocaleString()}</td>
+                <td style={th("#dbeafe", "#1e3a8a")} />
               </tr>
             </tfoot>
           )}
@@ -264,7 +286,7 @@ export default function Accounts() {
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr>{["Date","Category","Description","Amount (PKR)"].map(h => <th key={h} style={th("#d1fae5","#064e3b")}>{h}</th>)}</tr>
+            <tr>{["Date", "Category", "Description", "Amount (PKR)"].map(h => <th key={h} style={th("#d1fae5", "#064e3b")}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {!(income ?? []).length
@@ -282,8 +304,8 @@ export default function Accounts() {
           {(income ?? []).length > 0 && (
             <tfoot>
               <tr>
-                <td colSpan={3} style={th("#d1fae5","#064e3b")}>Total Other Income</td>
-                <td style={{ ...th("#d1fae5","#065f46"), fontWeight: 900 }}>PKR {manualIncomeTotal.toLocaleString()}</td>
+                <td colSpan={3} style={th("#d1fae5", "#064e3b")}>Total Other Income</td>
+                <td style={{ ...th("#d1fae5", "#065f46"), fontWeight: 900 }}>PKR {manualIncomeTotal.toLocaleString()}</td>
               </tr>
             </tfoot>
           )}
@@ -295,16 +317,16 @@ export default function Accounts() {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ width: 4, height: 18, background: "#b91c1c", borderRadius: 2 }} />
           <h3 style={{ margin: 0, fontSize: 11, fontWeight: 800, color: "#b91c1c", textTransform: "uppercase", letterSpacing: 0.7 }}>
-            Expenses — {(expenses ?? []).length} Records
+            Expenses — {(expenses ?? []).length} Records + {(salaries ?? []).filter(s => s.status === "paid").length} Salary Payments
           </h3>
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr>{["Date","Category","Description","Amount (PKR)"].map(h => <th key={h} style={th("#fee2e2","#7f1d1d")}>{h}</th>)}</tr>
+            <tr>{["Date", "Category", "Description", "Amount (PKR)"].map(h => <th key={h} style={th("#fee2e2", "#7f1d1d")}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {!(expenses ?? []).length
-              ? <tr><td colSpan={4} style={{ ...td, textAlign: "center", color: "#9ca3af", fontStyle: "italic" }}>No expenses this month</td></tr>
+              ? <tr><td colSpan={4} style={{ ...td, textAlign: "center", color: "#9ca3af", fontStyle: "italic" }}>No manual expenses this month</td></tr>
               : (expenses ?? []).map((e, i) => (
                 <tr key={e.id}>
                   <td style={i % 2 === 0 ? td : tdA}>{e.date}</td>
@@ -314,19 +336,25 @@ export default function Accounts() {
                 </tr>
               ))
             }
-          </tbody>
-          {(expenses ?? []).length > 0 && (
-            <tfoot>
-              <tr>
-                <td colSpan={3} style={th("#fee2e2","#7f1d1d")}>Total Expenses</td>
-                <td style={{ ...th("#fee2e2","#b91c1c"), fontWeight: 900 }}>PKR {totalExpensesValue.toLocaleString()}</td>
+            {(salaries ?? []).filter(s => s.status === "paid").map((s, i) => (
+              <tr key={`sal-${s.id}`}>
+                <td style={i % 2 === 0 ? td : tdA}>{s.month}</td>
+                <td style={{ ...td, color: "#b45309", fontWeight: 600 }}>Salary</td>
+                <td style={i % 2 === 0 ? td : tdA}>{(s as Record<string, unknown>).staffName as string ?? `Staff #${s.staffId}`}</td>
+                <td style={i % 2 === 0 ? td : tdA}>PKR {Number(s.amount).toLocaleString()}</td>
               </tr>
-            </tfoot>
-          )}
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={3} style={th("#fee2e2", "#7f1d1d")}>Total Expenses</td>
+              <td style={{ ...th("#fee2e2", "#b91c1c"), fontWeight: 900 }}>PKR {totalExpensesValue.toLocaleString()}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
 
-      {/* Net Profit box */}
+      {/* Net Profit */}
       <div style={{
         border: `2px solid ${netProfitValue >= 0 ? "#7c3aed" : "#dc2626"}`,
         borderRadius: 8, padding: "14px 20px",
@@ -356,10 +384,10 @@ export default function Accounts() {
 
   return (
     <>
-      {/* Print portal (outside React root, direct child of body) */}
       {printPortal}
 
       <div className="space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Accounts</h1>
@@ -397,10 +425,14 @@ export default function Accounts() {
         {/* 4 Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: "Fee Income",     value: feeIncomeTotal,    gradient: "from-blue-500 to-cyan-500",    icon: CreditCard,   hint: "From student fee payments"   },
-            { label: "Other Income",   value: manualIncomeTotal, gradient: "from-emerald-500 to-green-500",icon: TrendingUp,   hint: "Manually entered income"     },
-            { label: "Total Expenses", value: totalExpensesValue,gradient: "from-red-500 to-rose-500",     icon: TrendingDown, hint: "All expenses this month"     },
-            { label: "Net Profit",     value: netProfitValue,    gradient: netProfitValue >= 0 ? "from-purple-500 to-indigo-600" : "from-gray-600 to-gray-800", icon: DollarSign, hint: "Fee + Other Income − Expenses" },
+            { label: "Fee Income",     value: feeIncomeTotal,     gradient: "from-blue-500 to-cyan-500",     icon: CreditCard,   hint: "From student fee payments"              },
+            { label: "Other Income",   value: manualIncomeTotal,  gradient: "from-emerald-500 to-green-500", icon: TrendingUp,   hint: "Manually entered income"                },
+            { label: "Total Expenses", value: totalExpensesValue, gradient: "from-red-500 to-rose-500",      icon: TrendingDown, hint: `Manual + Salary: PKR ${salaryPaidTotal.toLocaleString()}` },
+            {
+              label: "Net Profit", value: netProfitValue,
+              gradient: netProfitValue >= 0 ? "from-purple-500 to-indigo-600" : "from-gray-600 to-gray-800",
+              icon: DollarSign, hint: "Fee + Other Income − Expenses",
+            },
           ].map(card => (
             <Card key={card.label} className={`bg-gradient-to-br ${card.gradient} border-0`}>
               <CardContent className="p-5 text-white">
@@ -448,16 +480,16 @@ export default function Accounts() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-gray-600 flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-blue-500" /> Fee Payments Collected — {monthLabel}
+                  <CreditCard className="w-4 h-4 text-blue-500" /> Fee Collections — {monthLabel}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 {feesLoading ? (
-                  <div className="p-6 space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                  <div className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead className="bg-blue-50">
-                      <tr>{["Date Paid","Student","Month","Paid Amount (PKR)","Status"].map(h => (
+                      <tr>{["Date Paid", "Student", "Month", "Paid Amount (PKR)", "Status"].map(h => (
                         <th key={h} className="text-left py-3 px-3 font-semibold text-blue-800">{h}</th>
                       ))}</tr>
                     </thead>
@@ -468,7 +500,7 @@ export default function Accounts() {
                           <tr key={f.id} className="border-b hover:bg-gray-50">
                             <td className="py-2.5 px-3 text-gray-600">{f.paidDate ?? "—"}</td>
                             <td className="py-2.5 px-3 text-gray-700 font-medium">
-                              {(f as Record<string,unknown>).studentName as string ?? `Student #${f.studentId}`}
+                              {(f as Record<string, unknown>).studentName as string ?? `Student #${f.studentId}`}
                             </td>
                             <td className="py-2.5 px-3 text-gray-600">{f.month}</td>
                             <td className="py-2.5 px-3 font-bold text-blue-600">PKR {(f.paidAmount ?? 0).toLocaleString()}</td>
@@ -509,11 +541,11 @@ export default function Accounts() {
               </CardHeader>
               <CardContent className="p-0">
                 {incomeLoading ? (
-                  <div className="p-6 space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                  <div className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead className="bg-emerald-50">
-                      <tr>{["Date","Category","Description","Amount (PKR)"].map(h => (
+                      <tr>{["Date", "Category", "Description", "Amount (PKR)"].map(h => (
                         <th key={h} className="text-left py-3 px-3 font-semibold text-emerald-800">{h}</th>
                       ))}</tr>
                     </thead>
@@ -554,36 +586,76 @@ export default function Accounts() {
               </CardHeader>
               <CardContent className="p-0">
                 {expensesLoading ? (
-                  <div className="p-6 space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                  <div className="p-6 space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
                 ) : (
-                  <table className="w-full text-sm">
-                    <thead className="bg-red-50">
-                      <tr>{["Date","Category","Description","Amount (PKR)"].map(h => (
-                        <th key={h} className="text-left py-3 px-3 font-semibold text-red-800">{h}</th>
-                      ))}</tr>
-                    </thead>
-                    <tbody>
-                      {!expenses?.length
-                        ? <tr><td colSpan={4} className="py-8 text-center text-gray-400">No expense records this month</td></tr>
-                        : expenses?.map(entry => (
-                          <tr key={entry.id} className="border-b hover:bg-gray-50" data-testid={`row-expense-${entry.id}`}>
-                            <td className="py-2.5 px-3 text-gray-600">{entry.date}</td>
-                            <td className="py-2.5 px-3 text-gray-700">{entry.category}</td>
-                            <td className="py-2.5 px-3 text-gray-600">{entry.description}</td>
-                            <td className="py-2.5 px-3 font-bold text-red-600">PKR {entry.amount.toLocaleString()}</td>
-                          </tr>
-                        ))
-                      }
-                    </tbody>
-                    {(expenses?.length ?? 0) > 0 && (
-                      <tfoot className="bg-red-50 border-t-2 border-red-200">
-                        <tr>
-                          <td colSpan={3} className="py-2.5 px-3 font-semibold text-red-800">Total Expenses</td>
-                          <td className="py-2.5 px-3 font-bold text-red-700">PKR {totalExpensesValue.toLocaleString()}</td>
-                        </tr>
-                      </tfoot>
+                  <>
+                    {/* Manual Expenses */}
+                    <table className="w-full text-sm">
+                      <thead className="bg-red-50">
+                        <tr>{["Date", "Category", "Description", "Amount (PKR)"].map(h => (
+                          <th key={h} className="text-left py-3 px-3 font-semibold text-red-800">{h}</th>
+                        ))}</tr>
+                      </thead>
+                      <tbody>
+                        {!expenses?.length
+                          ? <tr><td colSpan={4} className="py-6 text-center text-gray-400">No manual expense records this month</td></tr>
+                          : expenses?.map(entry => (
+                            <tr key={entry.id} className="border-b hover:bg-gray-50" data-testid={`row-expense-${entry.id}`}>
+                              <td className="py-2.5 px-3 text-gray-600">{entry.date}</td>
+                              <td className="py-2.5 px-3 text-gray-700">{entry.category}</td>
+                              <td className="py-2.5 px-3 text-gray-600">{entry.description}</td>
+                              <td className="py-2.5 px-3 font-bold text-red-600">PKR {entry.amount.toLocaleString()}</td>
+                            </tr>
+                          ))
+                        }
+                      </tbody>
+                    </table>
+
+                    {/* Salary Payments */}
+                    {salaryPaidTotal > 0 && (
+                      <div className="border-t-2 border-dashed border-orange-200 mt-2">
+                        <p className="text-xs font-semibold text-orange-600 uppercase tracking-wide px-3 py-2 bg-orange-50">
+                          Salary Payments (included in total expenses)
+                        </p>
+                        <table className="w-full text-sm">
+                          <thead className="bg-orange-50">
+                            <tr>
+                              {["Staff Name", "Month", "Amount (PKR)", "Status"].map(h => (
+                                <th key={h} className="text-left py-2.5 px-3 font-semibold text-orange-800">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(salaries ?? []).filter(s => s.status === "paid").map(s => (
+                              <tr key={s.id} className="border-b hover:bg-gray-50">
+                                <td className="py-2.5 px-3 font-medium text-gray-900">
+                                  {(s as Record<string, unknown>).staffName as string ?? `Staff #${s.staffId}`}
+                                </td>
+                                <td className="py-2.5 px-3 text-gray-600">{s.month}</td>
+                                <td className="py-2.5 px-3 font-bold text-orange-600">PKR {Number(s.amount).toLocaleString()}</td>
+                                <td className="py-2.5 px-3">
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold">Paid</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-orange-50 border-t-2 border-orange-200">
+                            <tr>
+                              <td colSpan={2} className="py-2.5 px-3 font-semibold text-orange-800">Total Salary Expenses</td>
+                              <td className="py-2.5 px-3 font-bold text-orange-700">PKR {salaryPaidTotal.toLocaleString()}</td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     )}
-                  </table>
+
+                    {/* Grand Total Expenses footer */}
+                    <div className="bg-red-50 border-t-2 border-red-200 px-3 py-2.5 flex justify-between items-center">
+                      <span className="font-semibold text-red-800">Grand Total Expenses (Manual + Salaries)</span>
+                      <span className="font-bold text-red-700">PKR {totalExpensesValue.toLocaleString()}</span>
+                    </div>
+                  </>
                 )}
               </CardContent>
             </Card>
