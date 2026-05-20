@@ -1,53 +1,11 @@
-name: Neon Database Backup
-
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * *"   # daily midnight UTC
-
-jobs:
-  backup:
-    runs-on: ubuntu-latest
-
-    steps:
-      # 1. Repo checkout
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # 2. Install PostgreSQL client
-      - name: Install PostgreSQL client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
-      # 3. Check secret is loaded
-      - name: Validate DATABASE_URL
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "❌ DATABASE_URL is missing"
-            exit 1
-          fi
-          echo "✅ DATABASE_URL loaded successfully"
-          echo "Length: ${#DATABASE_URL}"
-
-      # 4. Create backup
-      - name: Run pg_dump
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          mkdir -p backups
-          pg_dump "$DATABASE_URL" > backups/backup.sql
-
-      # 5. Add timestamp (optional rename)
-      - name: Rename backup with timestamp
-        run: |
-          mv backups/backup.sql backups/backup-$(date +%Y-%m-%d-%H-%M).sql
-
-      # 6. Upload backup file as artifact
-      - name: Upload backup
-        uses: actions/upload-artifact@v4
-        with:
-          name: neon-db-backup
-          path: backups/
+- name: FINAL SECRET DEBUG
+  env:
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  run: |
+    echo "CHECK START"
+    echo "LEN=${#DATABASE_URL}"
+    if [ -z "$DATABASE_URL" ]; then
+      echo "❌ STILL EMPTY"
+      exit 1
+    fi
+    echo "✅ WORKING"
