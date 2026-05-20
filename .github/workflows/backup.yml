@@ -1,11 +1,26 @@
-- name: FINAL SECRET DEBUG
-  env:
-    DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  run: |
-    echo "CHECK START"
-    echo "LEN=${#DATABASE_URL}"
-    if [ -z "$DATABASE_URL" ]; then
-      echo "❌ STILL EMPTY"
-      exit 1
-    fi
-    echo "✅ WORKING"
+name: Neon Backup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: ENV TEST
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "CHECK START"
+          echo "LEN=${#DATABASE_URL}"
+
+          if [ -z "$DATABASE_URL" ]; then
+            echo "❌ STILL EMPTY"
+            exit 1
+          fi
+
+          echo "✅ WORKING"
