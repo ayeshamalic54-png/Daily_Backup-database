@@ -8,27 +8,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates gnupg
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
 
       - name: Create backup folder
         run: mkdir -p backups
 
-      - name: Dump database
+      - name: Run pg_dump (PG17)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           pg_dump "$DATABASE_URL" > backups/backup.sql
 
-      - name: Rename backup with timestamp
+      - name: Rename backup
         run: |
           mv backups/backup.sql backups/backup-$(date +%Y-%m-%d-%H-%M).sql
 
-      - name: Upload Artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: neon-db-backup
+          name: neon-backup
           path: backups/
