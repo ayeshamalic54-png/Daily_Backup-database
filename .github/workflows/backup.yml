@@ -11,23 +11,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL 17 client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget ca-certificates gnupg
-          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
-
       - name: Create backup folder
         run: mkdir -p backups
 
-      - name: Run pg_dump (PG17)
+      - name: Run pg_dump using official Postgres 17 image
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          pg_dump "$DATABASE_URL" > backups/backup.sql
+          docker run --rm \
+            -e PGPASSWORD=$(echo "$DATABASE_URL" | sed -n 's/.*:\/\/.*:\(.*\)@.*/\1/p') \
+            postgres:17 \
+            bash -c "pg_dump '$DATABASE_URL' > /tmp/backup.sql && cat /tmp/backup.sql" \
+            > backups/backup.sql
 
       - name: Rename backup
         run: |
